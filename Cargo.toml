@@ -1,0 +1,33 @@
+[package]
+name = "wasm-tokio"
+version = "0.1.0"
+description = "Streaming WebAssembly codec based on Tokio"
+
+authors.workspace = true
+categories.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[workspace.package]
+authors = ["Roman Volosatovs <rvolosatovs@riseup.net>"]
+categories = ["wasm"]
+edition = "2021"
+license = "Apache-2.0 WITH LLVM-exception"
+repository = "https://github.com/wrpc/wasm-tokio"
+
+[features]
+default = ["tracing"]
+
+[workspace.dependencies]
+tokio = { version = "1", default-features = false }
+tracing = { version = "0.1", default-features = false }
+tracing-subscriber = { version = "0.3", default-features = false }
+
+[dependencies]
+tokio = { workspace = true, features = ["io-util"] }
+tracing = { workspace = true, features = ["attributes"], optional = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+tracing-subscriber = { workspace = true }
