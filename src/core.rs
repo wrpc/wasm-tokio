@@ -1,4 +1,5 @@
 use ::core::future::Future;
+use ::core::num::NonZeroU64;
 
 use tokio::io::{AsyncRead, AsyncReadExt as _, AsyncWrite, AsyncWriteExt as _};
 
@@ -149,6 +150,41 @@ pub trait AsyncReadCore: AsyncRead {
 
 impl<T: AsyncRead> AsyncReadCore for T {}
 
+pub trait AsyncReadUnsigned<T> {
+    fn read_unsigned(&mut self, n: u32) -> impl Future<Output = std::io::Result<T>>;
+}
+
+impl<T: AsyncRead + Unpin> AsyncReadUnsigned<u64> for T {
+    #[cfg_attr(
+        feature = "tracing",
+        tracing::instrument(level = "trace", ret, skip(self), fields(ty = "uN"))
+    )]
+    async fn read_unsigned(&mut self, n: u32) -> std::io::Result<u64> {
+        let max = (n / 7) + 1;
+        let mut x = 0;
+        let mut s = 0;
+        for _ in 0..max {
+            let b: u64 = self.read_u8().await?.into();
+            if b < 0x80 {
+                x |= b << s;
+                if x.checked_shr(n).and_then(NonZeroU64::new).is_some() {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        format!("varint overflows a {n}-bit integer"),
+                    ));
+                }
+                return Ok(x);
+            }
+            x |= (b & 0x7f) << s;
+            s += 7;
+        }
+        Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!("varint overflows a {n}-bit integer"),
+        ))
+    }
+}
+
 pub trait AsyncWriteCore: AsyncWrite {
     #[cfg_attr(
         feature = "tracing",
@@ -295,6 +331,42 @@ mod tests {
             .expect("failed to write u64");
         assert_eq!(n, 3);
         assert_eq!(buf, ENCODED);
+    }
+
+    #[tokio::test]
+    async fn unsigned() {
+        let v = [0x01]
+            .as_slice()
+            .read_unsigned(2)
+            .await
+            .expect("failed to read u2");
+        assert_eq!(v, 1);
+
+        let v = [0x02]
+            .as_slice()
+            .read_unsigned(2)
+            .await
+            .expect("failed to read u2");
+        assert_eq!(v, 2);
+
+        [0b100]
+            .as_slice()
+            .read_unsigned(2)
+            .await
+            .expect_err("u2 read should have failed, since it encoded 3 bits");
+
+        [0x80, 0x80, 0x01]
+            .as_slice()
+            .read_unsigned(9)
+            .await
+            .expect_err("u9 read should have failed, since it used over 9 bits");
+
+        let v = [0x80, 0x80, 0x80, 0x80, 0x80, 0x01]
+            .as_slice()
+            .read_unsigned(64)
+            .await
+            .expect("failed to read u64");
+        assert_eq!(v, 0b_1_0000000_0000000_0000000_0000000_0000000);
     }
 
     #[tokio::test]
