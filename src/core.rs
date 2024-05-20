@@ -177,7 +177,7 @@ pub trait AsyncReadCore: AsyncRead {
             let mut x = 0u8;
             let mut s = 0u8;
             for _ in 0..max {
-                let b: u8 = self.read_u8().await?.into();
+                let b: u8 = self.read_u8().await?;
                 if s == (n / 7) * 7 && b > n % 7 {
                     return Err(std::io::Error::new(
                         std::io::ErrorKind::InvalidData,
@@ -373,7 +373,7 @@ pub trait AsyncWriteCore: AsyncWrite {
             let mut buf = [0; 2];
             let mut i = 0;
             while x >= 0x80 {
-                buf[i] = (x as u8) | 0x80;
+                buf[i] = x | 0x80;
                 x >>= 7;
                 i += 1;
             }
@@ -501,18 +501,18 @@ mod tests {
             .read_u32_leb128()
             .await
             .expect("failed to read u32");
-        assert_eq!(v, 624485);
+        assert_eq!(v, 624_485);
 
         let v = ENCODED
             .as_slice()
             .read_u64_leb128()
             .await
             .expect("failed to read u64");
-        assert_eq!(v, 624485);
+        assert_eq!(v, 624_485);
 
         let mut buf = vec![];
         let n = buf
-            .write_u32_leb128(624485)
+            .write_u32_leb128(624_485)
             .await
             .expect("failed to write u32");
         assert_eq!(n, 3);
@@ -520,7 +520,7 @@ mod tests {
 
         let mut buf = vec![];
         let n = buf
-            .write_u64_leb128(624485)
+            .write_u64_leb128(624_485)
             .await
             .expect("failed to write u64");
         assert_eq!(n, 3);
@@ -659,7 +659,7 @@ mod tests {
             .read_core_unsigned_u64(64)
             .await
             .expect("failed to read u64");
-        assert_eq!(v, 0b_1_0000000_0000000_0000000_0000000_0000000);
+        assert_eq!(v, 0b1000_0000_0000_0000_0000_0000_0000_0000_0000);
     }
 
     #[tokio::test]
