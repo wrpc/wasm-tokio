@@ -141,7 +141,7 @@ pub trait AsyncReadCore: AsyncRead {
     {
         async {
             let mut x = 0;
-            let mut s = 0;
+            let mut s = 0u8;
             for _ in 0..19 {
                 let b: u128 = self.read_u8().await?.into();
                 if s == 126 && b > 0x03 {
