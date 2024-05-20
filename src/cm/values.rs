@@ -11,7 +11,7 @@ pub trait AsyncReadValue: AsyncRead {
     where
         Self: Unpin,
     {
-        async {
+        async move {
             match self.read_u8().await? {
                 0 => Ok(false),
                 1 => Ok(true),
@@ -31,7 +31,7 @@ pub trait AsyncReadValue: AsyncRead {
     where
         Self: Unpin,
     {
-        async {
+        async move {
             match self.read_u8().await? {
                 0 => Ok(false),
                 1 => Ok(true),
@@ -51,7 +51,7 @@ pub trait AsyncReadValue: AsyncRead {
     where
         Self: Unpin,
     {
-        async {
+        async move {
             match self.read_u8().await? {
                 0 => Ok(true),
                 1 => Ok(false),
@@ -75,7 +75,7 @@ pub trait AsyncWriteValue: AsyncWrite {
     where
         Self: Unpin,
     {
-        async { self.write_u8(v.into()).await }
+        async move { self.write_u8(v.into()).await }
     }
 
     #[cfg_attr(
@@ -86,7 +86,7 @@ pub trait AsyncWriteValue: AsyncWrite {
     where
         Self: Unpin,
     {
-        async { self.write_u8(v.is_some().into()).await }
+        async move { self.write_u8(v.is_some().into()).await }
     }
 
     #[cfg_attr(
@@ -100,7 +100,7 @@ pub trait AsyncWriteValue: AsyncWrite {
     where
         Self: Unpin,
     {
-        async { self.write_u8(v.is_err().into()).await }
+        async move { self.write_u8(v.is_err().into()).await }
     }
 }
 

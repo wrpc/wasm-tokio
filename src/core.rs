@@ -11,7 +11,7 @@ pub trait AsyncReadCore: AsyncRead {
     where
         Self: Unpin,
     {
-        async {
+        async move {
             let mut x = 0;
             let mut s = 0u8;
             for _ in 0..2 {
@@ -43,7 +43,7 @@ pub trait AsyncReadCore: AsyncRead {
     where
         Self: Unpin,
     {
-        async {
+        async move {
             let mut x = 0;
             let mut s = 0u8;
             for _ in 0..3 {
@@ -75,7 +75,7 @@ pub trait AsyncReadCore: AsyncRead {
     where
         Self: Unpin,
     {
-        async {
+        async move {
             let mut x = 0;
             let mut s = 0u8;
             for _ in 0..5 {
@@ -107,7 +107,7 @@ pub trait AsyncReadCore: AsyncRead {
     where
         Self: Unpin,
     {
-        async {
+        async move {
             let mut x = 0;
             let mut s = 0u8;
             for _ in 0..10 {
@@ -139,7 +139,7 @@ pub trait AsyncReadCore: AsyncRead {
     where
         Self: Unpin,
     {
-        async {
+        async move {
             let mut x = 0;
             let mut s = 0u8;
             for _ in 0..19 {
@@ -171,7 +171,7 @@ pub trait AsyncReadCore: AsyncRead {
     where
         Self: Unpin,
     {
-        async {
+        async move {
             debug_assert!(n <= 8);
             let max = (n / 7) + 1;
             let mut x = 0u8;
@@ -206,7 +206,7 @@ pub trait AsyncReadCore: AsyncRead {
     where
         Self: Unpin,
     {
-        async {
+        async move {
             debug_assert!(n <= 16);
             let max = (n / 7) + 1;
             let mut x = 0;
@@ -242,7 +242,7 @@ pub trait AsyncReadCore: AsyncRead {
     where
         Self: Unpin,
     {
-        async {
+        async move {
             debug_assert!(n <= 32);
             let max = (n / 7) + 1;
             let mut x = 0;
@@ -278,7 +278,7 @@ pub trait AsyncReadCore: AsyncRead {
     where
         Self: Unpin,
     {
-        async {
+        async move {
             debug_assert!(n <= 64);
             let max = (n / 7) + 1;
             let mut x = 0;
@@ -314,7 +314,7 @@ pub trait AsyncReadCore: AsyncRead {
     where
         Self: Unpin,
     {
-        async {
+        async move {
             debug_assert!(n <= 128);
             let max = (n / 7) + 1;
             let mut x = 0;
@@ -350,7 +350,7 @@ pub trait AsyncReadCore: AsyncRead {
     where
         Self: Unpin,
     {
-        async {
+        async move {
             let n = self.read_u32_leb128().await?;
             self.take(n.into()).read_to_string(s).await?;
             Ok(())
@@ -369,7 +369,7 @@ pub trait AsyncWriteCore: AsyncWrite {
     where
         Self: Unpin,
     {
-        async {
+        async move {
             let mut buf = [0; 2];
             let mut i = 0;
             while x >= 0x80 {
@@ -390,7 +390,7 @@ pub trait AsyncWriteCore: AsyncWrite {
     where
         Self: Unpin,
     {
-        async {
+        async move {
             let mut buf = [0; 3];
             let mut i = 0;
             while x >= 0x80 {
@@ -411,7 +411,7 @@ pub trait AsyncWriteCore: AsyncWrite {
     where
         Self: Unpin,
     {
-        async {
+        async move {
             let mut buf = [0; 5];
             let mut i = 0;
             while x >= 0x80 {
@@ -432,7 +432,7 @@ pub trait AsyncWriteCore: AsyncWrite {
     where
         Self: Unpin,
     {
-        async {
+        async move {
             let mut buf = [0; 10];
             let mut i = 0;
             while x >= 0x80 {
@@ -453,7 +453,7 @@ pub trait AsyncWriteCore: AsyncWrite {
     where
         Self: Unpin,
     {
-        async {
+        async move {
             let mut buf = [0; 10];
             let mut i = 0;
             while x >= 0x80 {
@@ -474,7 +474,7 @@ pub trait AsyncWriteCore: AsyncWrite {
     where
         Self: Unpin,
     {
-        async {
+        async move {
             let n = s
                 .len()
                 .try_into()
