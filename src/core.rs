@@ -354,6 +354,7 @@ pub trait AsyncReadCore: AsyncRead {
     {
         async move {
             let n = self.read_u32_leb128().await?;
+            s.reserve(n.try_into().unwrap_or(usize::MAX));
             self.take(n.into()).read_to_string(s).await?;
             Ok(())
         }
