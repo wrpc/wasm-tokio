@@ -1,6 +1,8 @@
 use ::core::future::Future;
 
 use tokio::io::{AsyncRead, AsyncReadExt as _, AsyncWrite, AsyncWriteExt as _};
+use tokio_util::bytes::{BufMut as _, BytesMut};
+use tokio_util::codec::Encoder;
 
 pub trait AsyncReadCore: AsyncRead {
     #[cfg_attr(
@@ -487,6 +489,44 @@ pub trait AsyncWriteCore: AsyncWrite {
 }
 
 impl<T: AsyncWrite> AsyncWriteCore for T {}
+
+pub struct Leb128Encoder;
+
+impl Encoder<u32> for Leb128Encoder {
+    type Error = std::io::Error;
+
+    fn encode(&mut self, mut item: u32, dst: &mut BytesMut) -> Result<(), Self::Error> {
+        let zeroes = item.leading_zeros().try_into().unwrap_or(usize::MAX);
+        dst.reserve(5 - zeroes / 7);
+        let mut buf = [0; 5];
+        let mut i = 0;
+        while item >= 0x80 {
+            buf[i] = (item as u8) | 0x80;
+            item >>= 7;
+            i += 1;
+        }
+        buf[i] = item as u8;
+        dst.put(&buf[..]);
+        Ok(())
+    }
+}
+
+pub struct CoreStringEncoder;
+
+impl Encoder<String> for CoreStringEncoder {
+    type Error = std::io::Error;
+
+    fn encode(&mut self, item: String, dst: &mut BytesMut) -> Result<(), Self::Error> {
+        let len = item.len();
+        let n: u32 = len
+            .try_into()
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidInput, e))?;
+        dst.reserve(len + 5 - n.leading_zeros() as usize / 7);
+        Leb128Encoder.encode(n, dst)?;
+        dst.put(item.as_bytes());
+        Ok(())
+    }
+}
 
 #[cfg(test)]
 mod tests {

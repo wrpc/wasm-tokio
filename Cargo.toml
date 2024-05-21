@@ -21,11 +21,13 @@ default = ["tracing"]
 
 [workspace.dependencies]
 tokio = { version = "1", default-features = false }
+tokio-util = { version = "0.7", default-features = false }
 tracing = { version = "0.1", default-features = false }
 tracing-subscriber = { version = "0.3", default-features = false }
 
 [dependencies]
 tokio = { workspace = true, features = ["io-util"] }
+tokio-util = { workspace = true, features = ["codec"] }
 tracing = { workspace = true, features = ["attributes"], optional = true }
 
 [dev-dependencies]
