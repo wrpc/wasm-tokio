@@ -1,2 +1,2 @@
 mod values;
-pub use values::{AsyncReadValue, AsyncWriteValue};
+pub use values::{AsyncReadValue, AsyncWriteValue, BoolEncoder, CharEncoder};
