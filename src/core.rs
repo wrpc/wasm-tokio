@@ -363,25 +363,73 @@ pub trait AsyncReadCore: AsyncRead {
 
 impl<T: AsyncRead> AsyncReadCore for T {}
 
+pub fn put_u8_leb128(buf: &mut [u8; 2], mut x: u8) -> &mut [u8] {
+    let mut i = 0;
+    while x >= 0x80 {
+        buf[i] = (x as u8) | 0x80;
+        x >>= 7;
+        i += 1;
+    }
+    buf[i] = x;
+    &mut buf[..=i]
+}
+
+pub fn put_u16_leb128(buf: &mut [u8; 3], mut x: u16) -> &mut [u8] {
+    let mut i = 0;
+    while x >= 0x80 {
+        buf[i] = (x as u8) | 0x80;
+        x >>= 7;
+        i += 1;
+    }
+    buf[i] = x as u8;
+    &mut buf[..=i]
+}
+
+pub fn put_u32_leb128(buf: &mut [u8; 5], mut x: u32) -> &mut [u8] {
+    let mut i = 0;
+    while x >= 0x80 {
+        buf[i] = (x as u8) | 0x80;
+        x >>= 7;
+        i += 1;
+    }
+    buf[i] = x as u8;
+    &mut buf[..=i]
+}
+
+pub fn put_u64_leb128(buf: &mut [u8; 10], mut x: u64) -> &mut [u8] {
+    let mut i = 0;
+    while x >= 0x80 {
+        buf[i] = (x as u8) | 0x80;
+        x >>= 7;
+        i += 1;
+    }
+    buf[i] = x as u8;
+    &mut buf[..=i]
+}
+
+pub fn put_u128_leb128(buf: &mut [u8; 19], mut x: u128) -> &mut [u8] {
+    let mut i = 0;
+    while x >= 0x80 {
+        buf[i] = (x as u8) | 0x80;
+        x >>= 7;
+        i += 1;
+    }
+    buf[i] = x as u8;
+    &mut buf[..=i]
+}
+
 pub trait AsyncWriteCore: AsyncWrite {
     #[cfg_attr(
         feature = "tracing",
         tracing::instrument(level = "trace", ret, skip_all, fields(ty = "u8"))
     )]
-    fn write_u8_leb128(&mut self, mut x: u8) -> impl Future<Output = std::io::Result<usize>>
+    fn write_u8_leb128(&mut self, x: u8) -> impl Future<Output = std::io::Result<()>>
     where
         Self: Unpin,
     {
         async move {
-            let mut buf = [0; 2];
-            let mut i = 0;
-            while x >= 0x80 {
-                buf[i] = x | 0x80;
-                x >>= 7;
-                i += 1;
-            }
-            buf[i] = x;
-            self.write(&buf[..=i]).await
+            self.write_all(put_u8_leb128(&mut Default::default(), x))
+                .await
         }
     }
 
@@ -389,20 +437,13 @@ pub trait AsyncWriteCore: AsyncWrite {
         feature = "tracing",
         tracing::instrument(level = "trace", ret, skip_all, fields(ty = "u16"))
     )]
-    fn write_u16_leb128(&mut self, mut x: u16) -> impl Future<Output = std::io::Result<usize>>
+    fn write_u16_leb128(&mut self, x: u16) -> impl Future<Output = std::io::Result<()>>
     where
         Self: Unpin,
     {
         async move {
-            let mut buf = [0; 3];
-            let mut i = 0;
-            while x >= 0x80 {
-                buf[i] = (x as u8) | 0x80;
-                x >>= 7;
-                i += 1;
-            }
-            buf[i] = x as u8;
-            self.write(&buf[..=i]).await
+            self.write_all(put_u16_leb128(&mut Default::default(), x))
+                .await
         }
     }
 
@@ -410,20 +451,13 @@ pub trait AsyncWriteCore: AsyncWrite {
         feature = "tracing",
         tracing::instrument(level = "trace", ret, skip_all, fields(ty = "u32"))
     )]
-    fn write_u32_leb128(&mut self, mut x: u32) -> impl Future<Output = std::io::Result<usize>>
+    fn write_u32_leb128(&mut self, x: u32) -> impl Future<Output = std::io::Result<()>>
     where
         Self: Unpin,
     {
         async move {
-            let mut buf = [0; 5];
-            let mut i = 0;
-            while x >= 0x80 {
-                buf[i] = (x as u8) | 0x80;
-                x >>= 7;
-                i += 1;
-            }
-            buf[i] = x as u8;
-            self.write(&buf[..=i]).await
+            self.write_all(put_u32_leb128(&mut Default::default(), x))
+                .await
         }
     }
 
@@ -431,20 +465,13 @@ pub trait AsyncWriteCore: AsyncWrite {
         feature = "tracing",
         tracing::instrument(level = "trace", ret, skip_all, fields(ty = "u64"))
     )]
-    fn write_u64_leb128(&mut self, mut x: u64) -> impl Future<Output = std::io::Result<usize>>
+    fn write_u64_leb128(&mut self, x: u64) -> impl Future<Output = std::io::Result<()>>
     where
         Self: Unpin,
     {
         async move {
-            let mut buf = [0; 10];
-            let mut i = 0;
-            while x >= 0x80 {
-                buf[i] = (x as u8) | 0x80;
-                x >>= 7;
-                i += 1;
-            }
-            buf[i] = x as u8;
-            self.write(&buf[..=i]).await
+            self.write_all(put_u64_leb128(&mut Default::default(), x))
+                .await
         }
     }
 
@@ -452,20 +479,13 @@ pub trait AsyncWriteCore: AsyncWrite {
         feature = "tracing",
         tracing::instrument(level = "trace", ret, skip_all, fields(ty = "u128"))
     )]
-    fn write_u128_leb128(&mut self, mut x: u128) -> impl Future<Output = std::io::Result<usize>>
+    fn write_u128_leb128(&mut self, x: u128) -> impl Future<Output = std::io::Result<()>>
     where
         Self: Unpin,
     {
         async move {
-            let mut buf = [0; 10];
-            let mut i = 0;
-            while x >= 0x80 {
-                buf[i] = (x as u8) | 0x80;
-                x >>= 7;
-                i += 1;
-            }
-            buf[i] = x as u8;
-            self.write(&buf[..=i]).await
+            self.write_all(put_u128_leb128(&mut Default::default(), x))
+                .await
         }
     }
 
@@ -478,13 +498,9 @@ pub trait AsyncWriteCore: AsyncWrite {
         Self: Unpin,
     {
         async move {
-            let n = s
-                .len()
-                .try_into()
-                .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidInput, e))?;
-            self.write_u32_leb128(n).await?;
-            self.write(s.as_bytes()).await?;
-            Ok(())
+            let mut buf = BytesMut::with_capacity(5usize.saturating_add(s.len()));
+            CoreStringEncoder.encode(s, &mut buf)?;
+            self.write_all(&buf).await
         }
     }
 }
@@ -493,31 +509,57 @@ impl<T: AsyncWrite> AsyncWriteCore for T {}
 
 pub struct Leb128Encoder;
 
+impl Encoder<u8> for Leb128Encoder {
+    type Error = std::io::Error;
+
+    fn encode(&mut self, x: u8, dst: &mut BytesMut) -> Result<(), Self::Error> {
+        dst.extend_from_slice(put_u8_leb128(&mut Default::default(), x));
+        Ok(())
+    }
+}
+
+impl Encoder<u16> for Leb128Encoder {
+    type Error = std::io::Error;
+
+    fn encode(&mut self, x: u16, dst: &mut BytesMut) -> Result<(), Self::Error> {
+        dst.extend_from_slice(put_u16_leb128(&mut Default::default(), x));
+        Ok(())
+    }
+}
+
 impl Encoder<u32> for Leb128Encoder {
     type Error = std::io::Error;
 
-    fn encode(&mut self, mut item: u32, dst: &mut BytesMut) -> Result<(), Self::Error> {
-        let zeroes = item.leading_zeros().try_into().unwrap_or(usize::MAX);
-        dst.reserve(5 - zeroes / 7);
-        let mut buf = [0; 5];
-        let mut i = 0;
-        while item >= 0x80 {
-            buf[i] = (item as u8) | 0x80;
-            item >>= 7;
-            i += 1;
-        }
-        buf[i] = item as u8;
-        dst.put(&buf[..]);
+    fn encode(&mut self, x: u32, dst: &mut BytesMut) -> Result<(), Self::Error> {
+        dst.extend_from_slice(put_u32_leb128(&mut Default::default(), x));
+        Ok(())
+    }
+}
+
+impl Encoder<u64> for Leb128Encoder {
+    type Error = std::io::Error;
+
+    fn encode(&mut self, x: u64, dst: &mut BytesMut) -> Result<(), Self::Error> {
+        dst.extend_from_slice(put_u64_leb128(&mut Default::default(), x));
+        Ok(())
+    }
+}
+
+impl Encoder<u128> for Leb128Encoder {
+    type Error = std::io::Error;
+
+    fn encode(&mut self, x: u128, dst: &mut BytesMut) -> Result<(), Self::Error> {
+        dst.extend_from_slice(put_u128_leb128(&mut Default::default(), x));
         Ok(())
     }
 }
 
 pub struct CoreStringEncoder;
 
-impl Encoder<String> for CoreStringEncoder {
+impl Encoder<&str> for CoreStringEncoder {
     type Error = std::io::Error;
 
-    fn encode(&mut self, item: String, dst: &mut BytesMut) -> Result<(), Self::Error> {
+    fn encode(&mut self, item: &str, dst: &mut BytesMut) -> Result<(), Self::Error> {
         let len = item.len();
         let n: u32 = len
             .try_into()
@@ -526,6 +568,14 @@ impl Encoder<String> for CoreStringEncoder {
         Leb128Encoder.encode(n, dst)?;
         dst.put(item.as_bytes());
         Ok(())
+    }
+}
+
+impl Encoder<String> for CoreStringEncoder {
+    type Error = std::io::Error;
+
+    fn encode(&mut self, item: String, dst: &mut BytesMut) -> Result<(), Self::Error> {
+        self.encode(item.as_str(), dst)
     }
 }
 
@@ -552,19 +602,15 @@ mod tests {
         assert_eq!(v, 624_485);
 
         let mut buf = vec![];
-        let n = buf
-            .write_u32_leb128(624_485)
+        buf.write_u32_leb128(624_485)
             .await
             .expect("failed to write u32");
-        assert_eq!(n, 3);
         assert_eq!(buf, ENCODED);
 
         let mut buf = vec![];
-        let n = buf
-            .write_u64_leb128(624_485)
+        buf.write_u64_leb128(624_485)
             .await
             .expect("failed to write u64");
-        assert_eq!(n, 3);
         assert_eq!(buf, ENCODED);
 
         let v = [0xff, 0x01]

@@ -1,8 +1,15 @@
 use ::core::future::Future;
 
 use tokio::io::{AsyncRead, AsyncReadExt as _, AsyncWrite, AsyncWriteExt as _};
+use tokio_util::{
+    bytes::{BufMut as _, BytesMut},
+    codec::Encoder,
+};
 
-use crate::core::{AsyncReadCore as _, AsyncWriteCore as _};
+use crate::{
+    core::{AsyncReadCore as _, AsyncWriteCore as _},
+    Leb128Encoder,
+};
 
 pub trait AsyncReadValue: AsyncRead {
     #[cfg_attr(
@@ -128,7 +135,7 @@ pub trait AsyncWriteValue: AsyncWrite {
         feature = "tracing",
         tracing::instrument(level = "trace", ret, skip_all, fields(ty = "char"))
     )]
-    fn write_char<T, E>(&mut self, v: char) -> impl Future<Output = std::io::Result<usize>>
+    fn write_char<T, E>(&mut self, v: char) -> impl Future<Output = std::io::Result<()>>
     where
         Self: Unpin + Sized,
     {
@@ -137,3 +144,24 @@ pub trait AsyncWriteValue: AsyncWrite {
 }
 
 impl<T: AsyncWrite> AsyncWriteValue for T {}
+
+pub struct BoolEncoder;
+
+impl Encoder<bool> for BoolEncoder {
+    type Error = std::io::Error;
+
+    fn encode(&mut self, item: bool, dst: &mut BytesMut) -> Result<(), Self::Error> {
+        dst.put_u8(item.into());
+        Ok(())
+    }
+}
+
+pub struct CharEncoder;
+
+impl Encoder<char> for CharEncoder {
+    type Error = std::io::Error;
+
+    fn encode(&mut self, item: char, dst: &mut BytesMut) -> Result<(), Self::Error> {
+        Leb128Encoder.encode(u32::from(item), dst)
+    }
+}
