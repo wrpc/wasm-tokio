@@ -4,6 +4,48 @@ use tokio::io::{AsyncRead, AsyncReadExt as _, AsyncWrite, AsyncWriteExt as _};
 use tokio_util::bytes::{BufMut as _, BytesMut};
 use tokio_util::codec::Encoder;
 
+fn overflow(n: u8) -> std::io::Error {
+    std::io::Error::new(
+        std::io::ErrorKind::InvalidData,
+        format!("varint overflows a {n}-bit integer"),
+    )
+}
+
+fn overflow_8() -> std::io::Error {
+    std::io::Error::new(
+        std::io::ErrorKind::InvalidData,
+        "varint overflows an 8-bit integer",
+    )
+}
+
+fn overflow_16() -> std::io::Error {
+    std::io::Error::new(
+        std::io::ErrorKind::InvalidData,
+        "varint overflows a 16-bit integer",
+    )
+}
+
+fn overflow_32() -> std::io::Error {
+    std::io::Error::new(
+        std::io::ErrorKind::InvalidData,
+        "varint overflows a 32-bit integer",
+    )
+}
+
+fn overflow_64() -> std::io::Error {
+    std::io::Error::new(
+        std::io::ErrorKind::InvalidData,
+        "varint overflows a 64-bit integer",
+    )
+}
+
+fn overflow_128() -> std::io::Error {
+    std::io::Error::new(
+        std::io::ErrorKind::InvalidData,
+        "varint overflows a 128-bit integer",
+    )
+}
+
 pub trait AsyncReadCore: AsyncRead {
     #[cfg_attr(
         feature = "tracing",
@@ -19,21 +61,15 @@ pub trait AsyncReadCore: AsyncRead {
             for _ in 0..2 {
                 let b = self.read_u8().await?;
                 if s == 7 && b > 0x01 {
-                    return Err(std::io::Error::new(
-                        std::io::ErrorKind::InvalidData,
-                        "varint overflows an 8-bit integer",
-                    ));
-                }
-                if b < 0x80 {
-                    return Ok(x | b << s);
+                    return Err(overflow_8());
                 }
                 x |= (b & 0x7f) << s;
+                if b & 0x80 == 0 {
+                    return Ok(x);
+                }
                 s += 7;
             }
-            Err(std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                "varint overflows an 8-bit integer",
-            ))
+            Err(overflow_8())
         }
     }
 
@@ -49,23 +85,17 @@ pub trait AsyncReadCore: AsyncRead {
             let mut x = 0;
             let mut s = 0u8;
             for _ in 0..3 {
-                let b: u16 = self.read_u8().await?.into();
+                let b = self.read_u8().await?;
                 if s == 14 && b > 0x03 {
-                    return Err(std::io::Error::new(
-                        std::io::ErrorKind::InvalidData,
-                        "varint overflows a 16-bit integer",
-                    ));
+                    return Err(overflow_16());
                 }
-                if b < 0x80 {
-                    return Ok(x | b << s);
+                x |= (u16::from(b) & 0x7f) << s;
+                if b & 0x80 == 0 {
+                    return Ok(x);
                 }
-                x |= (b & 0x7f) << s;
                 s += 7;
             }
-            Err(std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                "varint overflows a 16-bit integer",
-            ))
+            Err(overflow_16())
         }
     }
 
@@ -83,21 +113,15 @@ pub trait AsyncReadCore: AsyncRead {
             for _ in 0..5 {
                 let b: u32 = self.read_u8().await?.into();
                 if s == 28 && b > 0x0f {
-                    return Err(std::io::Error::new(
-                        std::io::ErrorKind::InvalidData,
-                        "varint overflows a 32-bit integer",
-                    ));
+                    return Err(overflow_32());
                 }
-                if b < 0x80 {
-                    return Ok(x | b << s);
+                x |= (u32::from(b) & 0x7f) << s;
+                if b & 0x80 == 0 {
+                    return Ok(x);
                 }
-                x |= (b & 0x7f) << s;
                 s += 7;
             }
-            Err(std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                "varint overflows a 32-bit integer",
-            ))
+            Err(overflow_32())
         }
     }
 
@@ -115,21 +139,15 @@ pub trait AsyncReadCore: AsyncRead {
             for _ in 0..10 {
                 let b: u64 = self.read_u8().await?.into();
                 if s == 63 && b > 0x01 {
-                    return Err(std::io::Error::new(
-                        std::io::ErrorKind::InvalidData,
-                        "varint overflows a 64-bit integer",
-                    ));
+                    return Err(overflow_64());
                 }
-                if b < 0x80 {
-                    return Ok(x | b << s);
+                x |= (u64::from(b) & 0x7f) << s;
+                if b & 0x80 == 0 {
+                    return Ok(x);
                 }
-                x |= (b & 0x7f) << s;
                 s += 7;
             }
-            Err(std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                "varint overflows a 64-bit integer",
-            ))
+            Err(overflow_64())
         }
     }
 
@@ -147,21 +165,15 @@ pub trait AsyncReadCore: AsyncRead {
             for _ in 0..19 {
                 let b: u128 = self.read_u8().await?.into();
                 if s == 126 && b > 0x03 {
-                    return Err(std::io::Error::new(
-                        std::io::ErrorKind::InvalidData,
-                        "varint overflows a 128-bit integer",
-                    ));
+                    return Err(overflow_128());
                 }
-                if b < 0x80 {
-                    return Ok(x | b << s);
+                x |= (u128::from(b) & 0x7f) << s;
+                if b & 0x80 == 0 {
+                    return Ok(x);
                 }
-                x |= (b & 0x7f) << s;
                 s += 7;
             }
-            Err(std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                "varint overflows a 128-bit integer",
-            ))
+            Err(overflow_128())
         }
     }
 
@@ -179,24 +191,17 @@ pub trait AsyncReadCore: AsyncRead {
             let mut x = 0u8;
             let mut s = 0u8;
             for _ in 0..max {
-                let b: u8 = self.read_u8().await?;
+                let b = self.read_u8().await?;
                 if s == (n / 7) * 7 && b > n % 7 {
-                    return Err(std::io::Error::new(
-                        std::io::ErrorKind::InvalidData,
-                        format!("varint overflows a {n}-bit integer"),
-                    ));
-                }
-                if b < 0x80 {
-                    x |= b << s;
-                    return Ok(x);
+                    return Err(overflow(n));
                 }
                 x |= (b & 0x7f) << s;
+                if b & 0x80 == 0 {
+                    return Ok(x);
+                }
                 s += 7;
             }
-            Err(std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                format!("varint overflows a {n}-bit integer"),
-            ))
+            Err(overflow(n))
         }
     }
 
@@ -216,23 +221,15 @@ pub trait AsyncReadCore: AsyncRead {
             for _ in 0..max {
                 let b = self.read_u8().await?;
                 if s == (n / 7) * 7 && b > n % 7 {
-                    return Err(std::io::Error::new(
-                        std::io::ErrorKind::InvalidData,
-                        format!("varint overflows a {n}-bit integer"),
-                    ));
+                    return Err(overflow(n));
                 }
-                let b: u16 = b.into();
-                if b < 0x80 {
-                    x |= b << s;
+                x |= (u16::from(b) & 0x7f) << s;
+                if b & 0x80 == 0 {
                     return Ok(x);
                 }
-                x |= (b & 0x7f) << s;
                 s += 7;
             }
-            Err(std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                format!("varint overflows a {n}-bit integer"),
-            ))
+            Err(overflow(n))
         }
     }
 
@@ -252,23 +249,15 @@ pub trait AsyncReadCore: AsyncRead {
             for _ in 0..max {
                 let b = self.read_u8().await?;
                 if s == (n / 7) * 7 && b > n % 7 {
-                    return Err(std::io::Error::new(
-                        std::io::ErrorKind::InvalidData,
-                        format!("varint overflows a {n}-bit integer"),
-                    ));
+                    return Err(overflow(n));
                 }
-                let b: u32 = b.into();
-                if b < 0x80 {
-                    x |= b << s;
+                x |= (u32::from(b) & 0x7f) << s;
+                if b & 0x80 == 0 {
                     return Ok(x);
                 }
-                x |= (b & 0x7f) << s;
                 s += 7;
             }
-            Err(std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                format!("varint overflows a {n}-bit integer"),
-            ))
+            Err(overflow(n))
         }
     }
 
@@ -288,23 +277,15 @@ pub trait AsyncReadCore: AsyncRead {
             for _ in 0..max {
                 let b = self.read_u8().await?;
                 if s == (n / 7) * 7 && b > n % 7 {
-                    return Err(std::io::Error::new(
-                        std::io::ErrorKind::InvalidData,
-                        format!("varint overflows a {n}-bit integer"),
-                    ));
+                    return Err(overflow(n));
                 }
-                let b: u64 = b.into();
-                if b < 0x80 {
-                    x |= b << s;
+                x |= (u64::from(b) & 0x7f) << s;
+                if b & 0x80 == 0 {
                     return Ok(x);
                 }
-                x |= (b & 0x7f) << s;
                 s += 7;
             }
-            Err(std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                format!("varint overflows a {n}-bit integer"),
-            ))
+            Err(overflow(n))
         }
     }
 
@@ -324,23 +305,165 @@ pub trait AsyncReadCore: AsyncRead {
             for _ in 0..max {
                 let b = self.read_u8().await?;
                 if s == (n / 7) * 7 && b > n % 7 {
-                    return Err(std::io::Error::new(
-                        std::io::ErrorKind::InvalidData,
-                        format!("varint overflows a {n}-bit integer"),
-                    ));
+                    return Err(overflow(n));
                 }
-                let b: u128 = b.into();
-                if b < 0x80 {
-                    x |= b << s;
+                x |= (u128::from(b) & 0x7f) << s;
+                if b & 0x80 == 0 {
                     return Ok(x);
                 }
-                x |= (b & 0x7f) << s;
                 s += 7;
             }
-            Err(std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                format!("varint overflows a {n}-bit integer"),
-            ))
+            Err(overflow(n))
+        }
+    }
+
+    #[cfg_attr(
+        feature = "tracing",
+        tracing::instrument(level = "trace", ret, skip_all, fields(ty = "i8"))
+    )]
+    fn read_i8_leb128(&mut self) -> impl Future<Output = std::io::Result<i8>>
+    where
+        Self: Unpin,
+    {
+        async move {
+            let mut x = 0;
+            let mut s = 0u8;
+            for _ in 0..2 {
+                let b = self.read_u8().await?;
+                if s == 7 && b > 0x01 {
+                    return Err(overflow_8());
+                }
+                x |= ((b as i8) & 0x7f) << s;
+                s += 7;
+                if b & 0x80 == 0 {
+                    if s != 14 && b & 0x40 != 0 {
+                        return Ok(x | !0 << s);
+                    } else {
+                        return Ok(x);
+                    }
+                }
+            }
+            Err(overflow_8())
+        }
+    }
+
+    #[cfg_attr(
+        feature = "tracing",
+        tracing::instrument(level = "trace", ret, skip_all, fields(ty = "i16"))
+    )]
+    fn read_i16_leb128(&mut self) -> impl Future<Output = std::io::Result<i16>>
+    where
+        Self: Unpin,
+    {
+        async move {
+            let mut x = 0;
+            let mut s = 0u8;
+            for _ in 0..3 {
+                let b = self.read_u8().await?;
+                if s == 14 && b > 0x03 {
+                    return Err(overflow_16());
+                }
+                x |= (i16::from(b) & 0x7f) << s;
+                s += 7;
+                if b & 0x80 == 0 {
+                    if s != 21 && b & 0x40 != 0 {
+                        return Ok(x | !0 << s);
+                    } else {
+                        return Ok(x);
+                    }
+                }
+            }
+            Err(overflow_16())
+        }
+    }
+
+    #[cfg_attr(
+        feature = "tracing",
+        tracing::instrument(level = "trace", ret, skip_all, fields(ty = "i32"))
+    )]
+    fn read_i32_leb128(&mut self) -> impl Future<Output = std::io::Result<i32>>
+    where
+        Self: Unpin,
+    {
+        async move {
+            let mut x = 0;
+            let mut s = 0u8;
+            for _ in 0..5 {
+                let b = self.read_u8().await?;
+                if s == 28 && b > 0x0f {
+                    return Err(overflow_32());
+                }
+                x |= (i32::from(b) & 0x7f) << s;
+                s += 7;
+                if b & 0x80 == 0 {
+                    if s != 35 && b & 0x40 != 0 {
+                        return Ok(x | !0 << s);
+                    } else {
+                        return Ok(x);
+                    }
+                }
+            }
+            Err(overflow_32())
+        }
+    }
+
+    #[cfg_attr(
+        feature = "tracing",
+        tracing::instrument(level = "trace", ret, skip_all, fields(ty = "i64"))
+    )]
+    fn read_i64_leb128(&mut self) -> impl Future<Output = std::io::Result<i64>>
+    where
+        Self: Unpin,
+    {
+        async move {
+            let mut x = 0;
+            let mut s = 0u8;
+            for _ in 0..10 {
+                let b = self.read_u8().await?;
+                if s == 63 && b > 0x01 {
+                    return Err(overflow_64());
+                }
+                x |= (i64::from(b) & 0x7f) << s;
+                s += 7;
+                if b & 0x80 == 0 {
+                    if s != 70 && b & 0x40 != 0 {
+                        return Ok(x | !0 << s);
+                    } else {
+                        return Ok(x);
+                    }
+                }
+            }
+            Err(overflow_64())
+        }
+    }
+
+    #[cfg_attr(
+        feature = "tracing",
+        tracing::instrument(level = "trace", ret, skip_all, fields(ty = "i128"))
+    )]
+    fn read_i128_leb128(&mut self) -> impl Future<Output = std::io::Result<i128>>
+    where
+        Self: Unpin,
+    {
+        async move {
+            let mut x = 0;
+            let mut s = 0u8;
+            for _ in 0..19 {
+                let b = self.read_u8().await?;
+                if s == 126 && b > 0x03 {
+                    return Err(overflow_128());
+                }
+                x |= (i128::from(b) & 0x7f) << s;
+                s += 7;
+                if b & 0x80 == 0 {
+                    if s != 133 && b & 0x40 != 0 {
+                        return Ok(x | !0 << s);
+                    } else {
+                        return Ok(x);
+                    }
+                }
+            }
+            Err(overflow_128())
         }
     }
 
@@ -418,6 +541,86 @@ pub fn put_u128_leb128(buf: &mut [u8; 19], mut x: u128) -> &mut [u8] {
     &mut buf[..=i]
 }
 
+pub fn put_i8_leb128(buf: &mut [u8; 2], mut x: i8) -> &mut [u8] {
+    let mut i = 0;
+    loop {
+        let b = x as u8;
+        x >>= 6;
+        if x == 0 || x == !0 {
+            buf[i] = b & 0x7f;
+            return &mut buf[..=i];
+        } else {
+            buf[i] = b | 0x80;
+            x >>= 1;
+        }
+        i += 1;
+    }
+}
+
+pub fn put_i16_leb128(buf: &mut [u8; 3], mut x: i16) -> &mut [u8] {
+    let mut i = 0;
+    loop {
+        let b = x as u8;
+        x >>= 6;
+        if x == 0 || x == !0 {
+            buf[i] = b & 0x7f;
+            return &mut buf[..=i];
+        } else {
+            buf[i] = b | 0x80;
+            x >>= 1;
+        }
+        i += 1;
+    }
+}
+
+pub fn put_i32_leb128(buf: &mut [u8; 5], mut x: i32) -> &mut [u8] {
+    let mut i = 0;
+    loop {
+        let b = x as u8;
+        x >>= 6;
+        if x == 0 || x == !0 {
+            buf[i] = b & 0x7f;
+            return &mut buf[..=i];
+        } else {
+            buf[i] = b | 0x80;
+            x >>= 1;
+        }
+        i += 1;
+    }
+}
+
+pub fn put_i64_leb128(buf: &mut [u8; 10], mut x: i64) -> &mut [u8] {
+    let mut i = 0;
+    loop {
+        let b = x as u8;
+        x >>= 6;
+        if x == 0 || x == !0 {
+            buf[i] = b & 0x7f;
+            return &mut buf[..=i];
+        } else {
+            buf[i] = b | 0x80;
+            x >>= 1;
+        }
+        i += 1;
+    }
+}
+
+pub fn put_i128_leb128(buf: &mut [u8; 19], mut x: i128) -> &mut [u8] {
+    let mut i = 0;
+    loop {
+        let b = x as u8;
+        x >>= 6;
+        if x == 0 || x == !0 {
+            buf[i] = b & 0x7f;
+            return &mut buf[..=i];
+        } else {
+            buf[i] = b | 0x80;
+            x >>= 1;
+        }
+        i += 1;
+    }
+}
+
 pub trait AsyncWriteCore: AsyncWrite {
     #[cfg_attr(
         feature = "tracing",
@@ -485,6 +688,76 @@ pub trait AsyncWriteCore: AsyncWrite {
     {
         async move {
             self.write_all(put_u128_leb128(&mut Default::default(), x))
+                .await
+        }
+    }
+
+    #[cfg_attr(
+        feature = "tracing",
+        tracing::instrument(level = "trace", ret, skip_all, fields(ty = "i8"))
+    )]
+    fn write_i8_leb128(&mut self, x: i8) -> impl Future<Output = std::io::Result<()>>
+    where
+        Self: Unpin,
+    {
+        async move {
+            self.write_all(put_i8_leb128(&mut Default::default(), x))
+                .await
+        }
+    }
+
+    #[cfg_attr(
+        feature = "tracing",
+        tracing::instrument(level = "trace", ret, skip_all, fields(ty = "i16"))
+    )]
+    fn write_i16_leb128(&mut self, x: i16) -> impl Future<Output = std::io::Result<()>>
+    where
+        Self: Unpin,
+    {
+        async move {
+            self.write_all(put_i16_leb128(&mut Default::default(), x))
+                .await
+        }
+    }
+
+    #[cfg_attr(
+        feature = "tracing",
+        tracing::instrument(level = "trace", ret, skip_all, fields(ty = "i32"))
+    )]
+    fn write_i32_leb128(&mut self, x: i32) -> impl Future<Output = std::io::Result<()>>
+    where
+        Self: Unpin,
+    {
+        async move {
+            self.write_all(put_i32_leb128(&mut Default::default(), x))
+                .await
+        }
+    }
+
+    #[cfg_attr(
+        feature = "tracing",
+        tracing::instrument(level = "trace", ret, skip_all, fields(ty = "i64"))
+    )]
+    fn write_i64_leb128(&mut self, x: i64) -> impl Future<Output = std::io::Result<()>>
+    where
+        Self: Unpin,
+    {
+        async move {
+            self.write_all(put_i64_leb128(&mut Default::default(), x))
+                .await
+        }
+    }
+
+    #[cfg_attr(
+        feature = "tracing",
+        tracing::instrument(level = "trace", ret, skip_all, fields(ty = "i128"))
+    )]
+    fn write_i128_leb128(&mut self, x: i128) -> impl Future<Output = std::io::Result<()>>
+    where
+        Self: Unpin,
+    {
+        async move {
+            self.write_all(put_i128_leb128(&mut Default::default(), x))
                 .await
         }
     }
@@ -711,6 +984,143 @@ mod tests {
         .read_u128_leb128()
         .await
         .expect_err("u128 read should have failed, since it encoded 129 bits");
+    }
+
+    #[tokio::test]
+    async fn signed_leb128() {
+        const ENCODED: [u8; 3] = [0xc0, 0xbb, 0x78];
+
+        let v = ENCODED
+            .as_slice()
+            .read_i32_leb128()
+            .await
+            .expect("failed to read i32");
+        assert_eq!(v, -123_456);
+
+        let v = ENCODED
+            .as_slice()
+            .read_i64_leb128()
+            .await
+            .expect("failed to read i64");
+        assert_eq!(v, -123_456);
+
+        let mut buf = vec![];
+        buf.write_i32_leb128(-123_456)
+            .await
+            .expect("failed to write i32");
+        assert_eq!(buf, ENCODED);
+
+        let mut buf = vec![];
+        buf.write_i64_leb128(-123_456)
+            .await
+            .expect("failed to write i64");
+        assert_eq!(buf, ENCODED);
+
+        let v = [0xff, 0x01]
+            .as_slice()
+            .read_i8_leb128()
+            .await
+            .expect("failed to read i8");
+        assert_eq!(v, -1);
+
+        let v = [0x7f]
+            .as_slice()
+            .read_i8_leb128()
+            .await
+            .expect("failed to read i8");
+        assert_eq!(v, -1);
+
+        let v = [0xff, 0x00]
+            .as_slice()
+            .read_i8_leb128()
+            .await
+            .expect("failed to read i8");
+        assert_eq!(v, 0x7f);
+
+        [0xff, 0x02]
+            .as_slice()
+            .read_i8_leb128()
+            .await
+            .expect_err("i8 read should have failed, since it encoded 9 bits");
+
+        let v = [0xff, 0xff, 0x01]
+            .as_slice()
+            .read_i16_leb128()
+            .await
+            .expect("failed to read i16");
+        assert_eq!(v, 0x7fff);
+
+        let v = [0xff, 0xff, 0x02]
+            .as_slice()
+            .read_i16_leb128()
+            .await
+            .expect("failed to read i16");
+        assert_eq!(v, -0x4001);
+
+        let v = [0xff, 0xff, 0x03]
+            .as_slice()
+            .read_i16_leb128()
+            .await
+            .expect("failed to read i16");
+        assert_eq!(v, -1);
+
+        [0xff, 0xff, 0x04]
+            .as_slice()
+            .read_i16_leb128()
+            .await
+            .expect_err("i16 read should have failed, since it encoded 17 bits");
+
+        let v = [0xff, 0xff, 0xff, 0xff, 0x0f]
+            .as_slice()
+            .read_i32_leb128()
+            .await
+            .expect("failed to read i32");
+        assert_eq!(v, -1);
+
+        let v = [0xfe, 0xff, 0xff, 0xff, 0x0f]
+            .as_slice()
+            .read_i32_leb128()
+            .await
+            .expect("failed to read i32");
+        assert_eq!(v, -2);
+
+        [0xff, 0xff, 0xff, 0xff, 0x10]
+            .as_slice()
+            .read_i32_leb128()
+            .await
+            .expect_err("i32 read should have failed, since it encoded 33 bits");
+
+        let v = [0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x01]
+            .as_slice()
+            .read_i64_leb128()
+            .await
+            .expect("failed to read i64");
+        assert_eq!(v, -1);
+
+        [0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x02]
+            .as_slice()
+            .read_i64_leb128()
+            .await
+            .expect_err("i64 read should have failed, since it encoded 65 bits");
+
+        let v = [
+            0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+            0xff, 0xff, 0xff, 0xff, 0x03,
+        ]
+        .as_slice()
+        .read_i128_leb128()
+        .await
+        .expect("failed to read i128");
+        assert_eq!(v, -1);
+
+        [
+            0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+            0xff, 0xff, 0xff, 0xff, 0x04,
+        ]
+        .as_slice()
+        .read_i128_leb128()
+        .await
+        .expect_err("i128 read should have failed, since it encoded 129 bits");
     }
 
     #[tokio::test]
