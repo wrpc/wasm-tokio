@@ -827,6 +827,51 @@ impl Encoder<u128> for Leb128Encoder {
     }
 }
 
+impl Encoder<i8> for Leb128Encoder {
+    type Error = std::io::Error;
+
+    fn encode(&mut self, x: i8, dst: &mut BytesMut) -> Result<(), Self::Error> {
+        dst.extend_from_slice(put_i8_leb128(&mut Default::default(), x));
+        Ok(())
+    }
+}
+
+impl Encoder<i16> for Leb128Encoder {
+    type Error = std::io::Error;
+
+    fn encode(&mut self, x: i16, dst: &mut BytesMut) -> Result<(), Self::Error> {
+        dst.extend_from_slice(put_i16_leb128(&mut Default::default(), x));
+        Ok(())
+    }
+}
+
+impl Encoder<i32> for Leb128Encoder {
+    type Error = std::io::Error;
+
+    fn encode(&mut self, x: i32, dst: &mut BytesMut) -> Result<(), Self::Error> {
+        dst.extend_from_slice(put_i32_leb128(&mut Default::default(), x));
+        Ok(())
+    }
+}
+
+impl Encoder<i64> for Leb128Encoder {
+    type Error = std::io::Error;
+
+    fn encode(&mut self, x: i64, dst: &mut BytesMut) -> Result<(), Self::Error> {
+        dst.extend_from_slice(put_i64_leb128(&mut Default::default(), x));
+        Ok(())
+    }
+}
+
+impl Encoder<i128> for Leb128Encoder {
+    type Error = std::io::Error;
+
+    fn encode(&mut self, x: i128, dst: &mut BytesMut) -> Result<(), Self::Error> {
+        dst.extend_from_slice(put_i128_leb128(&mut Default::default(), x));
+        Ok(())
+    }
+}
+
 pub struct CoreStringEncoder;
 
 impl Encoder<&str> for CoreStringEncoder {
