@@ -1,14 +1,10 @@
 use ::core::future::Future;
 
+use leb128_tokio::{AsyncReadLeb128 as _, AsyncWriteLeb128 as _, Leb128Encoder};
 use tokio::io::{AsyncRead, AsyncReadExt as _, AsyncWrite, AsyncWriteExt as _};
 use tokio_util::{
     bytes::{BufMut as _, BytesMut},
     codec::Encoder,
-};
-
-use crate::{
-    core::{AsyncReadCore as _, AsyncWriteCore as _},
-    Leb128Encoder,
 };
 
 pub trait AsyncReadValue: AsyncRead {
