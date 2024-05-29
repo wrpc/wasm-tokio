@@ -1061,6 +1061,18 @@ mod tests {
             .expect("failed to write i64");
         assert_eq!(buf, ENCODED);
 
+        let mut buf = vec![];
+        buf.write_i64_leb128(-1)
+            .await
+            .expect("failed to write i64");
+        assert_eq!(buf, [0x7f]);
+
+        let mut buf = vec![];
+        buf.write_i64_leb128(-2)
+            .await
+            .expect("failed to write i64");
+        assert_eq!(buf, [0x7e]);
+
         let v = [0xff, 0x01]
             .as_slice()
             .read_i8_leb128()
@@ -1114,6 +1126,20 @@ mod tests {
             .read_i16_leb128()
             .await
             .expect_err("i16 read should have failed, since it encoded 17 bits");
+
+        let v = [0x7f]
+            .as_slice()
+            .read_i32_leb128()
+            .await
+            .expect("failed to read i32");
+        assert_eq!(v, -1);
+
+        let v = [0x7e]
+            .as_slice()
+            .read_i32_leb128()
+            .await
+            .expect("failed to read i32");
+        assert_eq!(v, -2);
 
         let v = [0xff, 0xff, 0xff, 0xff, 0x0f]
             .as_slice()
