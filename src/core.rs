@@ -111,7 +111,7 @@ pub trait AsyncReadCore: AsyncRead {
             let mut x = 0;
             let mut s = 0u8;
             for _ in 0..5 {
-                let b: u32 = self.read_u8().await?.into();
+                let b = self.read_u8().await?;
                 if s == 28 && b > 0x0f {
                     return Err(overflow_32());
                 }
@@ -137,7 +137,7 @@ pub trait AsyncReadCore: AsyncRead {
             let mut x = 0;
             let mut s = 0u8;
             for _ in 0..10 {
-                let b: u64 = self.read_u8().await?.into();
+                let b = self.read_u8().await?;
                 if s == 63 && b > 0x01 {
                     return Err(overflow_64());
                 }
@@ -163,7 +163,7 @@ pub trait AsyncReadCore: AsyncRead {
             let mut x = 0;
             let mut s = 0u8;
             for _ in 0..19 {
-                let b: u128 = self.read_u8().await?.into();
+                let b = self.read_u8().await?;
                 if s == 126 && b > 0x03 {
                     return Err(overflow_128());
                 }
@@ -489,7 +489,7 @@ impl<T: AsyncRead> AsyncReadCore for T {}
 pub fn put_u8_leb128(buf: &mut [u8; 2], mut x: u8) -> &mut [u8] {
     let mut i = 0;
     while x >= 0x80 {
-        buf[i] = (x as u8) | 0x80;
+        buf[i] = x | 0x80;
         x >>= 7;
         i += 1;
     }
