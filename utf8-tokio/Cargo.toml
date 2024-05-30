@@ -1,0 +1,22 @@
+[package]
+name = "utf8-tokio"
+version = "0.1.0"
+description = "Streaming UTF-8 codec based on Tokio"
+
+authors.workspace = true
+categories.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[features]
+default = ["tracing"]
+
+[dependencies]
+tokio = { workspace = true, features = ["io-util"] }
+tokio-util = { workspace = true, features = ["codec"] }
+tracing = { workspace = true, features = ["attributes"], optional = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+tracing-subscriber = { workspace = true }
