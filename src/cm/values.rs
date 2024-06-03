@@ -1,6 +1,6 @@
 use ::core::future::Future;
 
-use leb128_tokio::{AsyncReadLeb128 as _, AsyncWriteLeb128 as _, Leb128Encoder};
+use leb128_tokio::{AsyncReadLeb128 as _, AsyncWriteLeb128 as _};
 use tokio::io::{AsyncRead, AsyncReadExt as _, AsyncWrite, AsyncWriteExt as _};
 use tokio_util::{
     bytes::{BufMut as _, BytesMut},
@@ -149,15 +149,5 @@ impl Encoder<bool> for BoolEncoder {
     fn encode(&mut self, item: bool, dst: &mut BytesMut) -> Result<(), Self::Error> {
         dst.put_u8(item.into());
         Ok(())
-    }
-}
-
-pub struct CharEncoder;
-
-impl Encoder<char> for CharEncoder {
-    type Error = std::io::Error;
-
-    fn encode(&mut self, item: char, dst: &mut BytesMut) -> Result<(), Self::Error> {
-        Leb128Encoder.encode(u32::from(item), dst)
     }
 }
