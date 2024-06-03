@@ -1,6 +1,5 @@
 use ::core::future::Future;
 
-use leb128_tokio::{AsyncReadLeb128 as _, AsyncWriteLeb128 as _};
 use tokio::io::{AsyncRead, AsyncReadExt as _, AsyncWrite, AsyncWriteExt as _};
 use tokio_util::{
     bytes::{BufMut as _, BytesMut},
@@ -67,25 +66,6 @@ pub trait AsyncReadValue: AsyncRead {
             }
         }
     }
-
-    #[cfg_attr(
-        feature = "tracing",
-        tracing::instrument(level = "trace", ret, skip_all, fields(ty = "char"))
-    )]
-    fn read_char(&mut self) -> impl Future<Output = std::io::Result<char>>
-    where
-        Self: Unpin + Sized,
-    {
-        async move {
-            let n = self.read_u32_leb128().await?;
-            char::from_u32(n).ok_or_else(|| {
-                std::io::Error::new(
-                    std::io::ErrorKind::InvalidData,
-                    format!("invalid character value `{n}`"),
-                )
-            })
-        }
-    }
 }
 
 impl<T: AsyncRead> AsyncReadValue for T {}
@@ -125,17 +105,6 @@ pub trait AsyncWriteValue: AsyncWrite {
         Self: Unpin,
     {
         async move { self.write_u8(v.is_err().into()).await }
-    }
-
-    #[cfg_attr(
-        feature = "tracing",
-        tracing::instrument(level = "trace", ret, skip_all, fields(ty = "char"))
-    )]
-    fn write_char<T, E>(&mut self, v: char) -> impl Future<Output = std::io::Result<()>>
-    where
-        Self: Unpin + Sized,
-    {
-        async move { self.write_u32_leb128(v.into()).await }
     }
 }
 
