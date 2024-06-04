@@ -76,7 +76,7 @@ checksum = "d231dfb89cfffdbc30e7fc41579ed6066ad03abda9e567ccafae602b97ec5024"
 
 [[package]]
 name = "leb128-tokio"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "tokio",
  "tokio-util",
@@ -247,7 +247,7 @@ checksum = "3354b9ac3fae1ff6755cb6db53683adb661634f67557942dea4facebec0fee4b"
 
 [[package]]
 name = "utf8-tokio"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "tokio",
  "tokio-util",
@@ -257,7 +257,7 @@ dependencies = [
 
 [[package]]
 name = "wasm-tokio"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "leb128-tokio",
  "tokio",
