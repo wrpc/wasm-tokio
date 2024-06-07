@@ -1,8 +1,8 @@
-use ::core::future::Future;
 use ::core::fmt::Display;
+use ::core::future::Future;
 
 use tokio::io::{AsyncRead, AsyncReadExt as _, AsyncWrite, AsyncWriteExt as _};
-use tokio_util::bytes::BytesMut;
+use tokio_util::bytes::{Buf as _, BytesMut};
 use tokio_util::codec::{Decoder, Encoder};
 
 /// Error returned for overflows decoding statically-sized integers
@@ -816,6 +816,7 @@ impl Decoder for Leb128DecoderU8 {
             }
             x |= (b & 0x7f) << s;
             if b & 0x80 == 0 {
+                src.advance(i + 1);
                 return Ok(Some(x));
             }
             s += 7;
@@ -843,6 +844,7 @@ impl Decoder for Leb128DecoderU16 {
             }
             x |= (u16::from(*b) & 0x7f) << s;
             if b & 0x80 == 0 {
+                src.advance(i + 1);
                 return Ok(Some(x));
             }
             s += 7;
@@ -870,6 +872,7 @@ impl Decoder for Leb128DecoderU32 {
             }
             x |= (u32::from(*b) & 0x7f) << s;
             if b & 0x80 == 0 {
+                src.advance(i + 1);
                 return Ok(Some(x));
             }
             s += 7;
@@ -897,6 +900,7 @@ impl Decoder for Leb128DecoderU64 {
             }
             x |= (u64::from(*b) & 0x7f) << s;
             if b & 0x80 == 0 {
+                src.advance(i + 1);
                 return Ok(Some(x));
             }
             s += 7;
@@ -924,6 +928,7 @@ impl Decoder for Leb128DecoderU128 {
             }
             x |= (u128::from(*b) & 0x7f) << s;
             if b & 0x80 == 0 {
+                src.advance(i + 1);
                 return Ok(Some(x));
             }
             s += 7;

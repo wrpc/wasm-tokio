@@ -1,6 +1,6 @@
 [package]
 name = "leb128-tokio"
-version = "0.1.3"
+version = "0.1.4"
 description = "Streaming LEB128 codec based on Tokio"
 
 authors.workspace = true
