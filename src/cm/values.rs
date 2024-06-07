@@ -126,7 +126,7 @@ impl Decoder for BoolCodec {
     type Error = std::io::Error;
 
     fn decode(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
-        let Some(v) = src.get(0) else { return Ok(None) };
+        let Some(v) = src.first() else { return Ok(None) };
         match *v {
             0 => Ok(Some(false)),
             1 => Ok(Some(true)),

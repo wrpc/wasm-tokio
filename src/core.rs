@@ -333,7 +333,7 @@ mod tests {
             Some(
                 [
                     "foo".to_string(),
-                    "".to_string(),
+                    String::new(),
                     "test".to_string(),
                     "bar".to_string(),
                     "ƒ𐍈Ő".to_string(),

@@ -82,7 +82,7 @@ impl Decoder for Utf8Codec {
     type Error = std::io::Error;
 
     fn decode(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
-        let Some(b) = src.get(0).copied() else {
+        let Some(b) = src.first().copied() else {
             src.reserve(1);
             return Ok(None);
         };
