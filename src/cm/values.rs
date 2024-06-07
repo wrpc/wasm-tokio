@@ -3,7 +3,7 @@ use ::core::future::Future;
 use tokio::io::{AsyncRead, AsyncReadExt as _, AsyncWrite, AsyncWriteExt as _};
 use tokio_util::{
     bytes::{BufMut as _, BytesMut},
-    codec::Encoder,
+    codec::{Decoder, Encoder},
 };
 
 pub trait AsyncReadValue: AsyncRead {
@@ -110,13 +110,30 @@ pub trait AsyncWriteValue: AsyncWrite {
 
 impl<T: AsyncWrite> AsyncWriteValue for T {}
 
-pub struct BoolEncoder;
+pub struct BoolCodec;
 
-impl Encoder<bool> for BoolEncoder {
+impl Encoder<bool> for BoolCodec {
     type Error = std::io::Error;
 
     fn encode(&mut self, item: bool, dst: &mut BytesMut) -> Result<(), Self::Error> {
         dst.put_u8(item.into());
         Ok(())
+    }
+}
+
+impl Decoder for BoolCodec {
+    type Item = bool;
+    type Error = std::io::Error;
+
+    fn decode(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
+        let Some(v) = src.get(0) else { return Ok(None) };
+        match *v {
+            0 => Ok(Some(false)),
+            1 => Ok(Some(true)),
+            n => Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!("invalid bool value byte `{n}`"),
+            )),
+        }
     }
 }
