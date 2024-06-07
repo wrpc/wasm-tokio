@@ -1,6 +1,5 @@
 use ::core::future::Future;
-use core::fmt::Display;
-use core::marker::PhantomData;
+use ::core::fmt::Display;
 
 use tokio::io::{AsyncRead, AsyncReadExt as _, AsyncWrite, AsyncWriteExt as _};
 use tokio_util::bytes::BytesMut;
