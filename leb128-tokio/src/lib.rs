@@ -1,49 +1,69 @@
 use ::core::future::Future;
+use core::fmt::Display;
+use core::marker::PhantomData;
 
 use tokio::io::{AsyncRead, AsyncReadExt as _, AsyncWrite, AsyncWriteExt as _};
 use tokio_util::bytes::BytesMut;
-use tokio_util::codec::Encoder;
+use tokio_util::codec::{Decoder, Encoder};
 
-fn overflow(n: u8) -> std::io::Error {
-    std::io::Error::new(
-        std::io::ErrorKind::InvalidData,
-        format!("varint overflows a {n}-bit integer"),
-    )
+/// Error returned for overflows decoding statically-sized integers
+#[derive(Debug)]
+pub struct Overflow<const N: usize>;
+
+impl Display for Overflow<8> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "varint overflows an 8-bit integer")
+    }
 }
 
-fn overflow_8() -> std::io::Error {
-    std::io::Error::new(
-        std::io::ErrorKind::InvalidData,
-        "varint overflows an 8-bit integer",
-    )
+impl std::error::Error for Overflow<8> {}
+
+impl Display for Overflow<16> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "varint overflows a 16-bit integer")
+    }
 }
 
-fn overflow_16() -> std::io::Error {
-    std::io::Error::new(
-        std::io::ErrorKind::InvalidData,
-        "varint overflows a 16-bit integer",
-    )
+impl std::error::Error for Overflow<16> {}
+
+impl Display for Overflow<32> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "varint overflows a 32-bit integer")
+    }
 }
 
-fn overflow_32() -> std::io::Error {
-    std::io::Error::new(
-        std::io::ErrorKind::InvalidData,
-        "varint overflows a 32-bit integer",
-    )
+impl std::error::Error for Overflow<32> {}
+
+impl Display for Overflow<64> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "varint overflows a 64-bit integer")
+    }
 }
 
-fn overflow_64() -> std::io::Error {
-    std::io::Error::new(
-        std::io::ErrorKind::InvalidData,
-        "varint overflows a 64-bit integer",
-    )
+impl std::error::Error for Overflow<64> {}
+
+impl Display for Overflow<128> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "varint overflows a 128-bit integer")
+    }
 }
 
-fn overflow_128() -> std::io::Error {
-    std::io::Error::new(
-        std::io::ErrorKind::InvalidData,
-        "varint overflows a 128-bit integer",
-    )
+impl std::error::Error for Overflow<128> {}
+
+/// Error returned for overflows decoding variable size integers
+#[derive(Debug)]
+pub struct OverflowVar(u8);
+
+impl Display for OverflowVar {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "varint overflows a {}-bit integer", self.0)
+    }
+}
+
+impl std::error::Error for OverflowVar {}
+
+fn invalid_data(err: impl Sync + Send + std::error::Error + 'static) -> std::io::Error {
+    std::io::Error::new(std::io::ErrorKind::InvalidData, err)
 }
 
 pub trait AsyncReadLeb128: AsyncRead {
@@ -61,7 +81,7 @@ pub trait AsyncReadLeb128: AsyncRead {
             for _ in 0..2 {
                 let b = self.read_u8().await?;
                 if s == 7 && b > 0x01 {
-                    return Err(overflow_8());
+                    return Err(invalid_data(Overflow::<8>));
                 }
                 x |= (b & 0x7f) << s;
                 if b & 0x80 == 0 {
@@ -69,7 +89,7 @@ pub trait AsyncReadLeb128: AsyncRead {
                 }
                 s += 7;
             }
-            Err(overflow_8())
+            Err(invalid_data(Overflow::<8>))
         }
     }
 
@@ -87,7 +107,7 @@ pub trait AsyncReadLeb128: AsyncRead {
             for _ in 0..3 {
                 let b = self.read_u8().await?;
                 if s == 14 && b > 0x03 {
-                    return Err(overflow_16());
+                    return Err(invalid_data(Overflow::<16>));
                 }
                 x |= (u16::from(b) & 0x7f) << s;
                 if b & 0x80 == 0 {
@@ -95,7 +115,7 @@ pub trait AsyncReadLeb128: AsyncRead {
                 }
                 s += 7;
             }
-            Err(overflow_16())
+            Err(invalid_data(Overflow::<16>))
         }
     }
 
@@ -113,7 +133,7 @@ pub trait AsyncReadLeb128: AsyncRead {
             for _ in 0..5 {
                 let b = self.read_u8().await?;
                 if s == 28 && b > 0x0f {
-                    return Err(overflow_32());
+                    return Err(invalid_data(Overflow::<32>));
                 }
                 x |= (u32::from(b) & 0x7f) << s;
                 if b & 0x80 == 0 {
@@ -121,7 +141,7 @@ pub trait AsyncReadLeb128: AsyncRead {
                 }
                 s += 7;
             }
-            Err(overflow_32())
+            Err(invalid_data(Overflow::<32>))
         }
     }
 
@@ -139,7 +159,7 @@ pub trait AsyncReadLeb128: AsyncRead {
             for _ in 0..10 {
                 let b = self.read_u8().await?;
                 if s == 63 && b > 0x01 {
-                    return Err(overflow_64());
+                    return Err(invalid_data(Overflow::<64>));
                 }
                 x |= (u64::from(b) & 0x7f) << s;
                 if b & 0x80 == 0 {
@@ -147,7 +167,7 @@ pub trait AsyncReadLeb128: AsyncRead {
                 }
                 s += 7;
             }
-            Err(overflow_64())
+            Err(invalid_data(Overflow::<64>))
         }
     }
 
@@ -165,7 +185,7 @@ pub trait AsyncReadLeb128: AsyncRead {
             for _ in 0..19 {
                 let b = self.read_u8().await?;
                 if s == 126 && b > 0x03 {
-                    return Err(overflow_128());
+                    return Err(invalid_data(Overflow::<128>));
                 }
                 x |= (u128::from(b) & 0x7f) << s;
                 if b & 0x80 == 0 {
@@ -173,7 +193,7 @@ pub trait AsyncReadLeb128: AsyncRead {
                 }
                 s += 7;
             }
-            Err(overflow_128())
+            Err(invalid_data(Overflow::<128>))
         }
     }
 
@@ -196,7 +216,7 @@ pub trait AsyncReadLeb128: AsyncRead {
             for _ in 0..max {
                 let b = self.read_u8().await?;
                 if s == (n / 7) * 7 && b > n % 7 {
-                    return Err(overflow(n));
+                    return Err(invalid_data(OverflowVar(n)));
                 }
                 x |= (b & 0x7f) << s;
                 if b & 0x80 == 0 {
@@ -204,7 +224,7 @@ pub trait AsyncReadLeb128: AsyncRead {
                 }
                 s += 7;
             }
-            Err(overflow(n))
+            Err(invalid_data(OverflowVar(n)))
         }
     }
 
@@ -229,7 +249,7 @@ pub trait AsyncReadLeb128: AsyncRead {
             for _ in 0..max {
                 let b = self.read_u8().await?;
                 if s == (n / 7) * 7 && b > n % 7 {
-                    return Err(overflow(n));
+                    return Err(invalid_data(OverflowVar(n)));
                 }
                 x |= (u16::from(b) & 0x7f) << s;
                 if b & 0x80 == 0 {
@@ -237,7 +257,7 @@ pub trait AsyncReadLeb128: AsyncRead {
                 }
                 s += 7;
             }
-            Err(overflow(n))
+            Err(invalid_data(OverflowVar(n)))
         }
     }
 
@@ -263,7 +283,7 @@ pub trait AsyncReadLeb128: AsyncRead {
             for _ in 0..max {
                 let b = self.read_u8().await?;
                 if s == (n / 7) * 7 && b > n % 7 {
-                    return Err(overflow(n));
+                    return Err(invalid_data(OverflowVar(n)));
                 }
                 x |= (u32::from(b) & 0x7f) << s;
                 if b & 0x80 == 0 {
@@ -271,7 +291,7 @@ pub trait AsyncReadLeb128: AsyncRead {
                 }
                 s += 7;
             }
-            Err(overflow(n))
+            Err(invalid_data(OverflowVar(n)))
         }
     }
 
@@ -298,7 +318,7 @@ pub trait AsyncReadLeb128: AsyncRead {
             for _ in 0..max {
                 let b = self.read_u8().await?;
                 if s == (n / 7) * 7 && b > n % 7 {
-                    return Err(overflow(n));
+                    return Err(invalid_data(OverflowVar(n)));
                 }
                 x |= (u64::from(b) & 0x7f) << s;
                 if b & 0x80 == 0 {
@@ -306,7 +326,7 @@ pub trait AsyncReadLeb128: AsyncRead {
                 }
                 s += 7;
             }
-            Err(overflow(n))
+            Err(invalid_data(OverflowVar(n)))
         }
     }
 
@@ -334,7 +354,7 @@ pub trait AsyncReadLeb128: AsyncRead {
             for _ in 0..max {
                 let b = self.read_u8().await?;
                 if s == (n / 7) * 7 && b > n % 7 {
-                    return Err(overflow(n));
+                    return Err(invalid_data(OverflowVar(n)));
                 }
                 x |= (u128::from(b) & 0x7f) << s;
                 if b & 0x80 == 0 {
@@ -342,7 +362,7 @@ pub trait AsyncReadLeb128: AsyncRead {
                 }
                 s += 7;
             }
-            Err(overflow(n))
+            Err(invalid_data(OverflowVar(n)))
         }
     }
 
@@ -360,7 +380,7 @@ pub trait AsyncReadLeb128: AsyncRead {
             for _ in 0..2 {
                 let b = self.read_u8().await?;
                 if s == 7 && b > 0x01 {
-                    return Err(overflow_8());
+                    return Err(invalid_data(Overflow::<8>));
                 }
                 x |= ((b as i8) & 0x7f) << s;
                 s += 7;
@@ -372,7 +392,7 @@ pub trait AsyncReadLeb128: AsyncRead {
                     }
                 }
             }
-            Err(overflow_8())
+            Err(invalid_data(Overflow::<8>))
         }
     }
 
@@ -390,7 +410,7 @@ pub trait AsyncReadLeb128: AsyncRead {
             for _ in 0..3 {
                 let b = self.read_u8().await?;
                 if s == 14 && b > 0x03 {
-                    return Err(overflow_16());
+                    return Err(invalid_data(Overflow::<16>));
                 }
                 x |= (i16::from(b) & 0x7f) << s;
                 s += 7;
@@ -402,7 +422,7 @@ pub trait AsyncReadLeb128: AsyncRead {
                     }
                 }
             }
-            Err(overflow_16())
+            Err(invalid_data(Overflow::<16>))
         }
     }
 
@@ -420,7 +440,7 @@ pub trait AsyncReadLeb128: AsyncRead {
             for _ in 0..5 {
                 let b = self.read_u8().await?;
                 if s == 28 && b > 0x0f {
-                    return Err(overflow_32());
+                    return Err(invalid_data(Overflow::<32>));
                 }
                 x |= (i32::from(b) & 0x7f) << s;
                 s += 7;
@@ -432,7 +452,7 @@ pub trait AsyncReadLeb128: AsyncRead {
                     }
                 }
             }
-            Err(overflow_32())
+            Err(invalid_data(Overflow::<32>))
         }
     }
 
@@ -450,7 +470,7 @@ pub trait AsyncReadLeb128: AsyncRead {
             for _ in 0..10 {
                 let b = self.read_u8().await?;
                 if s == 63 && b > 0x01 {
-                    return Err(overflow_64());
+                    return Err(invalid_data(Overflow::<64>));
                 }
                 x |= (i64::from(b) & 0x7f) << s;
                 s += 7;
@@ -462,7 +482,7 @@ pub trait AsyncReadLeb128: AsyncRead {
                     }
                 }
             }
-            Err(overflow_64())
+            Err(invalid_data(Overflow::<64>))
         }
     }
 
@@ -480,7 +500,7 @@ pub trait AsyncReadLeb128: AsyncRead {
             for _ in 0..19 {
                 let b = self.read_u8().await?;
                 if s == 126 && b > 0x03 {
-                    return Err(overflow_128());
+                    return Err(invalid_data(Overflow::<128>));
                 }
                 x |= (i128::from(b) & 0x7f) << s;
                 s += 7;
@@ -492,7 +512,7 @@ pub trait AsyncReadLeb128: AsyncRead {
                     }
                 }
             }
-            Err(overflow_128())
+            Err(invalid_data(Overflow::<128>))
         }
     }
 }
@@ -778,6 +798,141 @@ pub trait AsyncWriteLeb128: AsyncWrite {
 
 impl<T: AsyncWrite> AsyncWriteLeb128 for T {}
 
+pub struct Leb128DecoderU8;
+
+impl Decoder for Leb128DecoderU8 {
+    type Item = u8;
+    type Error = std::io::Error;
+
+    fn decode(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
+        let mut x = 0;
+        let mut s = 0u8;
+        for i in 0..2 {
+            let Some(b) = src.get(i) else {
+                src.reserve(1);
+                return Ok(None);
+            };
+            if s == 7 && *b > 0x01 {
+                return Err(invalid_data(Overflow::<8>));
+            }
+            x |= (b & 0x7f) << s;
+            if b & 0x80 == 0 {
+                return Ok(Some(x));
+            }
+            s += 7;
+        }
+        Err(invalid_data(Overflow::<8>))
+    }
+}
+
+pub struct Leb128DecoderU16;
+
+impl Decoder for Leb128DecoderU16 {
+    type Item = u16;
+    type Error = std::io::Error;
+
+    fn decode(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
+        let mut x = 0;
+        let mut s = 0u8;
+        for i in 0..3 {
+            let Some(b) = src.get(i) else {
+                src.reserve(1);
+                return Ok(None);
+            };
+            if s == 14 && *b > 0x03 {
+                return Err(invalid_data(Overflow::<16>));
+            }
+            x |= (u16::from(*b) & 0x7f) << s;
+            if b & 0x80 == 0 {
+                return Ok(Some(x));
+            }
+            s += 7;
+        }
+        Err(invalid_data(Overflow::<16>))
+    }
+}
+
+pub struct Leb128DecoderU32;
+
+impl Decoder for Leb128DecoderU32 {
+    type Item = u32;
+    type Error = std::io::Error;
+
+    fn decode(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
+        let mut x = 0;
+        let mut s = 0u8;
+        for i in 0..5 {
+            let Some(b) = src.get(i) else {
+                src.reserve(1);
+                return Ok(None);
+            };
+            if s == 28 && *b > 0x0f {
+                return Err(invalid_data(Overflow::<32>));
+            }
+            x |= (u32::from(*b) & 0x7f) << s;
+            if b & 0x80 == 0 {
+                return Ok(Some(x));
+            }
+            s += 7;
+        }
+        Err(invalid_data(Overflow::<32>))
+    }
+}
+
+pub struct Leb128DecoderU64;
+
+impl Decoder for Leb128DecoderU64 {
+    type Item = u64;
+    type Error = std::io::Error;
+
+    fn decode(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
+        let mut x = 0;
+        let mut s = 0u8;
+        for i in 0..10 {
+            let Some(b) = src.get(i) else {
+                src.reserve(1);
+                return Ok(None);
+            };
+            if s == 63 && *b > 0x01 {
+                return Err(invalid_data(Overflow::<64>));
+            }
+            x |= (u64::from(*b) & 0x7f) << s;
+            if b & 0x80 == 0 {
+                return Ok(Some(x));
+            }
+            s += 7;
+        }
+        Err(invalid_data(Overflow::<64>))
+    }
+}
+
+pub struct Leb128DecoderU128;
+
+impl Decoder for Leb128DecoderU128 {
+    type Item = u128;
+    type Error = std::io::Error;
+
+    fn decode(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
+        let mut x = 0;
+        let mut s = 0u8;
+        for i in 0..19 {
+            let Some(b) = src.get(i) else {
+                src.reserve(1);
+                return Ok(None);
+            };
+            if s == 126 && *b > 0x03 {
+                return Err(invalid_data(Overflow::<128>));
+            }
+            x |= (u128::from(*b) & 0x7f) << s;
+            if b & 0x80 == 0 {
+                return Ok(Some(x));
+            }
+            s += 7;
+        }
+        Err(invalid_data(Overflow::<128>))
+    }
+}
+
 pub struct Leb128Encoder;
 
 impl Encoder<u8> for Leb128Encoder {
@@ -885,12 +1040,22 @@ mod tests {
             .expect("failed to read u32");
         assert_eq!(v, 624_485);
 
+        let v = Leb128DecoderU32
+            .decode(&mut ENCODED.as_slice().into())
+            .expect("failed to decode u32");
+        assert_eq!(v, Some(624_485));
+
         let v = ENCODED
             .as_slice()
             .read_u64_leb128()
             .await
             .expect("failed to read u64");
         assert_eq!(v, 624_485);
+
+        let v = Leb128DecoderU64
+            .decode(&mut ENCODED.as_slice().into())
+            .expect("failed to decode u64");
+        assert_eq!(v, Some(624_485));
 
         let mut buf = vec![];
         buf.write_u32_leb128(624_485)
