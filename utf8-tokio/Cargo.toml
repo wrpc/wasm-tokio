@@ -1,6 +1,6 @@
 [package]
 name = "utf8-tokio"
-version = "0.1.1"
+version = "0.2.0"
 description = "Streaming UTF-8 codec based on Tokio"
 
 authors.workspace = true
@@ -18,5 +18,6 @@ tokio-util = { workspace = true, features = ["codec"] }
 tracing = { workspace = true, features = ["attributes"], optional = true }
 
 [dev-dependencies]
+test-log = { workspace = true, features = ["color", "log", "trace"] }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 tracing-subscriber = { workspace = true }

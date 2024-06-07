@@ -1,8 +1,8 @@
 use ::core::future::Future;
 
 use tokio::io::{AsyncRead, AsyncReadExt as _, AsyncWrite, AsyncWriteExt as _};
-use tokio_util::bytes::BytesMut;
-use tokio_util::codec::Encoder;
+use tokio_util::bytes::{Buf as _, BytesMut};
+use tokio_util::codec::{Decoder, Encoder};
 
 fn invalid_utf8() -> std::io::Error {
     std::io::Error::new(std::io::ErrorKind::InvalidInput, "value is not valid UTF8")
@@ -75,9 +75,81 @@ pub trait AsyncWriteUtf8: AsyncWrite {
 
 impl<T: AsyncWrite> AsyncWriteUtf8 for T {}
 
-pub struct Utf8Encoder;
+pub struct Utf8Codec;
 
-impl Encoder<char> for Utf8Encoder {
+impl Decoder for Utf8Codec {
+    type Item = char;
+    type Error = std::io::Error;
+
+    fn decode(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
+        let Some(b) = src.get(0).copied() else {
+            src.reserve(1);
+            return Ok(None);
+        };
+        let i = if b & 0x80 == 0 {
+            src.advance(1);
+            u32::from(b)
+        } else if b & 0b1110_0000 == 0b1100_0000 {
+            let Some(b2) = src.get(1).copied() else {
+                src.reserve(1);
+                return Ok(None);
+            };
+            if b2 & 0b1100_0000 != 0b1000_0000 {
+                return Err(invalid_utf8());
+            }
+            src.advance(2);
+            u32::from(b & 0b0001_1111) << 6 | u32::from(b2 & 0b0011_1111)
+        } else if b & 0b1111_0000 == 0b1110_0000 {
+            let Some(b2) = src.get(1).copied() else {
+                src.reserve(2);
+                return Ok(None);
+            };
+            let Some(b3) = src.get(2).copied() else {
+                src.reserve(1);
+                return Ok(None);
+            };
+            if b2 & 0b1100_0000 != 0b1000_0000 || b3 & 0b1100_0000 != 0b1000_0000 {
+                return Err(invalid_utf8());
+            }
+            src.advance(3);
+            u32::from(b & 0b0000_1111) << 12
+                | u32::from(b2 & 0b0011_1111) << 6
+                | u32::from(b3 & 0b0011_1111)
+        } else if b & 0b1111_1000 == 0b1111_0000 {
+            let Some(b2) = src.get(1).copied() else {
+                src.reserve(3);
+                return Ok(None);
+            };
+            let Some(b3) = src.get(2).copied() else {
+                src.reserve(2);
+                return Ok(None);
+            };
+            let Some(b4) = src.get(3).copied() else {
+                src.reserve(1);
+                return Ok(None);
+            };
+            if b2 & 0b1100_0000 != 0b1000_0000
+                || b3 & 0b1100_0000 != 0b1000_0000
+                || b4 & 0b1100_0000 != 0b1000_0000
+            {
+                return Err(invalid_utf8());
+            }
+            src.advance(4);
+            u32::from(b & 0b0000_0111) << 18
+                | u32::from(b2 & 0b0011_1111) << 12
+                | u32::from(b3 & 0b0011_1111) << 6
+                | u32::from(b4 & 0b0011_1111)
+        } else {
+            return Err(invalid_utf8());
+        };
+        let c = i
+            .try_into()
+            .map_err(|err| std::io::Error::new(std::io::ErrorKind::InvalidInput, err))?;
+        Ok(Some(c))
+    }
+}
+
+impl Encoder<char> for Utf8Codec {
     type Error = std::io::Error;
 
     fn encode(&mut self, x: char, dst: &mut BytesMut) -> Result<(), Self::Error> {
@@ -90,7 +162,7 @@ impl Encoder<char> for Utf8Encoder {
 mod tests {
     use super::*;
 
-    #[tokio::test]
+    #[test_log::test(tokio::test)]
     async fn codec() {
         let v = '$'
             .encode_utf8(&mut [0; 1])
