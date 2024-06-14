@@ -937,6 +937,166 @@ impl Decoder for Leb128DecoderU128 {
     }
 }
 
+pub struct Leb128DecoderI8;
+
+impl Decoder for Leb128DecoderI8 {
+    type Item = i8;
+    type Error = std::io::Error;
+
+    fn decode(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
+        let mut x = 0;
+        let mut s = 0u8;
+        for i in 0..2 {
+            let Some(b) = src.get(i).copied() else {
+                src.reserve(1);
+                return Ok(None);
+            };
+            if s == 7 && b > 0x01 {
+                return Err(invalid_data(Overflow::<8>));
+            }
+            x |= ((b as i8) & 0x7f) << s;
+            s += 7;
+            if b & 0x80 == 0 {
+                src.advance(i + 1);
+                if s != 14 && b & 0x40 != 0 {
+                    return Ok(Some(x | !0 << s));
+                } else {
+                    return Ok(Some(x));
+                }
+            }
+        }
+        Err(invalid_data(Overflow::<8>))
+    }
+}
+
+pub struct Leb128DecoderI16;
+
+impl Decoder for Leb128DecoderI16 {
+    type Item = i16;
+    type Error = std::io::Error;
+
+    fn decode(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
+        let mut x = 0;
+        let mut s = 0u8;
+        for i in 0..3 {
+            let Some(b) = src.get(i).copied() else {
+                src.reserve(1);
+                return Ok(None);
+            };
+            if s == 14 && b > 0x03 {
+                return Err(invalid_data(Overflow::<16>));
+            }
+            x |= (i16::from(b) & 0x7f) << s;
+            s += 7;
+            if b & 0x80 == 0 {
+                src.advance(i + 1);
+                if s != 21 && b & 0x40 != 0 {
+                    return Ok(Some(x | !0 << s));
+                } else {
+                    return Ok(Some(x));
+                }
+            }
+        }
+        Err(invalid_data(Overflow::<16>))
+    }
+}
+
+pub struct Leb128DecoderI32;
+
+impl Decoder for Leb128DecoderI32 {
+    type Item = i32;
+    type Error = std::io::Error;
+
+    fn decode(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
+        let mut x = 0;
+        let mut s = 0u8;
+        for i in 0..5 {
+            let Some(b) = src.get(i).copied() else {
+                src.reserve(1);
+                return Ok(None);
+            };
+            if s == 28 && b > 0x0f {
+                return Err(invalid_data(Overflow::<32>));
+            }
+            x |= (i32::from(b) & 0x7f) << s;
+            s += 7;
+            if b & 0x80 == 0 {
+                src.advance(i + 1);
+                if s != 35 && b & 0x40 != 0 {
+                    return Ok(Some(x | !0 << s));
+                } else {
+                    return Ok(Some(x));
+                }
+            }
+        }
+        Err(invalid_data(Overflow::<32>))
+    }
+}
+
+pub struct Leb128DecoderI64;
+
+impl Decoder for Leb128DecoderI64 {
+    type Item = i64;
+    type Error = std::io::Error;
+
+    fn decode(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
+        let mut x = 0;
+        let mut s = 0u8;
+        for i in 0..10 {
+            let Some(b) = src.get(i).copied() else {
+                src.reserve(1);
+                return Ok(None);
+            };
+            if s == 63 && b > 0x01 {
+                return Err(invalid_data(Overflow::<64>));
+            }
+            x |= (i64::from(b) & 0x7f) << s;
+            s += 7;
+            if b & 0x80 == 0 {
+                src.advance(i + 1);
+                if s != 70 && b & 0x40 != 0 {
+                    return Ok(Some(x | !0 << s));
+                } else {
+                    return Ok(Some(x));
+                }
+            }
+        }
+        Err(invalid_data(Overflow::<64>))
+    }
+}
+
+pub struct Leb128DecoderI128;
+
+impl Decoder for Leb128DecoderI128 {
+    type Item = i128;
+    type Error = std::io::Error;
+
+    fn decode(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
+        let mut x = 0;
+        let mut s = 0u8;
+        for i in 0..19 {
+            let Some(b) = src.get(i).copied() else {
+                src.reserve(1);
+                return Ok(None);
+            };
+            if s == 126 && b > 0x03 {
+                return Err(invalid_data(Overflow::<128>));
+            }
+            x |= (i128::from(b) & 0x7f) << s;
+            s += 7;
+            if b & 0x80 == 0 {
+                src.advance(i + 1);
+                if s != 133 && b & 0x40 != 0 {
+                    return Ok(Some(x | !0 << s));
+                } else {
+                    return Ok(Some(x));
+                }
+            }
+        }
+        Err(invalid_data(Overflow::<128>))
+    }
+}
+
 pub struct Leb128Encoder;
 
 impl Encoder<u8> for Leb128Encoder {

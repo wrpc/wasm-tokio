@@ -4,7 +4,7 @@ use ::core::str;
 
 use leb128_tokio::{AsyncReadLeb128, Leb128DecoderU32, Leb128Encoder};
 use tokio::io::{AsyncRead, AsyncReadExt as _, AsyncWrite, AsyncWriteExt as _};
-use tokio_util::bytes::{BufMut as _, BytesMut};
+use tokio_util::bytes::{BufMut as _, Bytes, BytesMut};
 use tokio_util::codec::{Decoder, Encoder};
 
 pub trait AsyncReadCore: AsyncRead {
@@ -49,7 +49,7 @@ pub trait AsyncWriteCore: AsyncWrite {
 impl<T: AsyncWrite> AsyncWriteCore for T {}
 
 /// [`core:name`](https://webassembly.github.io/spec/core/binary/values.html#names) encoder
-#[derive(Debug, Default)]
+#[derive(Copy, Clone, Debug, Default, Eq, PartialEq)]
 pub struct CoreNameEncoder;
 
 impl Encoder<&str> for CoreNameEncoder {
@@ -93,32 +93,16 @@ impl Encoder<&String> for CoreNameEncoder {
 
 /// [`core:name`](https://webassembly.github.io/spec/core/binary/values.html#names) decoder
 #[derive(Debug, Default)]
-pub struct CoreNameDecoder(usize);
+pub struct CoreNameDecoder(CoreVecDecoderBytes);
 
 impl Decoder for CoreNameDecoder {
     type Item = String;
     type Error = std::io::Error;
 
     fn decode(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
-        if self.0 == 0 {
-            let Some(len) = Leb128DecoderU32.decode(src)? else {
-                return Ok(None);
-            };
-            if len == 0 {
-                return Ok(Some(String::default()));
-            }
-            let len = len
-                .try_into()
-                .map_err(|err| std::io::Error::new(std::io::ErrorKind::InvalidInput, err))?;
-            self.0 = len;
-        }
-        let n = self.0.saturating_sub(src.len());
-        if n > 0 {
-            src.reserve(n);
+        let Some(buf) = self.0.decode(src)? else {
             return Ok(None);
-        }
-        let buf = src.split_to(self.0);
-        self.0 = 0;
+        };
         let s = str::from_utf8(&buf)
             .map_err(|err| std::io::Error::new(std::io::ErrorKind::InvalidData, err))?;
         Ok(Some(s.to_string()))
@@ -149,6 +133,7 @@ where
 }
 
 /// [`core:vec`](https://webassembly.github.io/spec/core/binary/conventions.html#binary-vec) decoder
+#[derive(Debug)]
 pub struct CoreVecDecoder<T: Decoder> {
     dec: T,
     ret: Vec<T::Item>,
@@ -180,10 +165,9 @@ where
 impl<T> Decoder for CoreVecDecoder<T>
 where
     T: Decoder,
-    T::Error: Into<std::io::Error>,
 {
     type Item = Vec<T::Item>;
-    type Error = std::io::Error;
+    type Error = T::Error;
 
     fn decode(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
         if self.cap == 0 {
@@ -200,13 +184,83 @@ where
             self.cap = len;
         }
         while self.cap > 0 {
-            let Some(v) = self.dec.decode(src).map_err(Into::into)? else {
+            let Some(v) = self.dec.decode(src)? else {
                 return Ok(None);
             };
             self.ret.push(v);
             self.cap -= 1;
         }
         Ok(Some(mem::take(&mut self.ret)))
+    }
+}
+
+/// [`core:vec`](https://webassembly.github.io/spec/core/binary/conventions.html#binary-vec)
+/// encoder optimized for vectors of byte-sized values
+#[derive(Copy, Clone, Debug, Default, Eq, PartialEq)]
+pub struct CoreVecEncoderBytes;
+
+impl Encoder<&[u8]> for CoreVecEncoderBytes {
+    type Error = std::io::Error;
+
+    fn encode(&mut self, item: &[u8], dst: &mut BytesMut) -> Result<(), Self::Error> {
+        let n = item.len();
+        let n = u32::try_from(n)
+            .map_err(|err| std::io::Error::new(std::io::ErrorKind::InvalidInput, err))?;
+        dst.reserve(item.len().saturating_add(5));
+        Leb128Encoder.encode(n, dst)?;
+        dst.extend_from_slice(&item);
+        Ok(())
+    }
+}
+
+impl Encoder<Vec<u8>> for CoreVecEncoderBytes {
+    type Error = std::io::Error;
+
+    fn encode(&mut self, item: Vec<u8>, dst: &mut BytesMut) -> Result<(), Self::Error> {
+        let item: &[u8] = item.as_ref();
+        self.encode(item, dst)
+    }
+}
+
+impl Encoder<Bytes> for CoreVecEncoderBytes {
+    type Error = std::io::Error;
+
+    fn encode(&mut self, item: Bytes, dst: &mut BytesMut) -> Result<(), Self::Error> {
+        let item: &[u8] = item.as_ref();
+        self.encode(item, dst)
+    }
+}
+
+/// [`core:vec`](https://webassembly.github.io/spec/core/binary/conventions.html#binary-vec)
+/// decoder optimized for vectors of byte-sized values
+#[derive(Debug, Default)]
+pub struct CoreVecDecoderBytes(usize);
+
+impl Decoder for CoreVecDecoderBytes {
+    type Item = Bytes;
+    type Error = std::io::Error;
+
+    fn decode(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
+        if self.0 == 0 {
+            let Some(len) = Leb128DecoderU32.decode(src)? else {
+                return Ok(None);
+            };
+            if len == 0 {
+                return Ok(Some(Bytes::default()));
+            }
+            let len = len
+                .try_into()
+                .map_err(|err| std::io::Error::new(std::io::ErrorKind::InvalidInput, err))?;
+            self.0 = len;
+        }
+        let n = self.0.saturating_sub(src.len());
+        if n > 0 {
+            src.reserve(n);
+            return Ok(None);
+        }
+        let buf = src.split_to(self.0);
+        self.0 = 0;
+        Ok(Some(buf.freeze()))
     }
 }
 
