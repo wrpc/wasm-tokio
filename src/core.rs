@@ -151,6 +151,10 @@ where
             cap: 0,
         }
     }
+
+    pub fn into_inner(CoreVecDecoder { dec, .. }: CoreVecDecoder<T>) -> T {
+        dec
+    }
 }
 
 impl<T> Default for CoreVecDecoder<T>

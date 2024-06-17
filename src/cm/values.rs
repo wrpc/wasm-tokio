@@ -1,5 +1,5 @@
 use ::core::future::Future;
-use core::mem;
+use ::core::mem;
 
 use leb128_tokio::{
     Leb128DecoderI16, Leb128DecoderI32, Leb128DecoderI64, Leb128DecoderU16, Leb128DecoderU32,
@@ -27,8 +27,8 @@ macro_rules! impl_encode_copy_ref {
             type Error = std::io::Error;
 
             #[cfg_attr(
-                        feature = "tracing",
-                        tracing::instrument(level = "trace", ret, fields(ty = stringify!($t)))
+                       feature = "tracing",
+                       tracing::instrument(level = "trace", ret, fields(ty = stringify!($t)))
                     )]
             fn encode(&mut self, item: &$t, dst: &mut BytesMut) -> Result<(), Self::Error> {
                 self.encode(*item, dst)
@@ -648,6 +648,12 @@ where
 pub struct TupleDecoder<C, V> {
     dec: C,
     v: V,
+}
+
+impl<C, V> TupleDecoder<C, V> {
+    pub fn into_inner(TupleDecoder { dec, .. }: TupleDecoder<C, V>) -> C {
+        dec
+    }
 }
 
 impl<C, V> TupleDecoder<C, V>
