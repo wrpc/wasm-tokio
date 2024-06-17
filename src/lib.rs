@@ -1,3 +1,5 @@
+#![allow(clippy::module_name_repetitions)]
+
 mod core;
 
 /// [Component model](https://component-model.bytecodealliance.org/) codec

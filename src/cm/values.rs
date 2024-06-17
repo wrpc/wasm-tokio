@@ -696,7 +696,7 @@ where
             let Some(dv) = d.decode(src)? else {
                 return Ok(None);
             };
-            *v = Some(dv)
+            *v = Some(dv);
         }
         Ok(Some((mem::take(v).unwrap(),)))
     }
@@ -913,7 +913,7 @@ mod tests {
         .decode(&mut buf)
         .expect("failed to decode tuple")
         .expect("short tuple read");
-        assert_eq!(a, true);
+        assert!(a);
         assert_eq!(b, 0xfe);
         assert_eq!(c, "test");
         assert_eq!(d, 0x42);

@@ -1,3 +1,5 @@
+#![allow(clippy::cast_possible_truncation)]
+
 use ::core::fmt::Display;
 use ::core::future::Future;
 

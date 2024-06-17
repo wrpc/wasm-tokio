@@ -212,7 +212,7 @@ impl Encoder<&[u8]> for CoreVecEncoderBytes {
             .map_err(|err| std::io::Error::new(std::io::ErrorKind::InvalidInput, err))?;
         dst.reserve(item.len().saturating_add(5));
         Leb128Encoder.encode(n, dst)?;
-        dst.extend_from_slice(&item);
+        dst.extend_from_slice(item);
         Ok(())
     }
 }
