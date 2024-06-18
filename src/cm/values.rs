@@ -646,8 +646,8 @@ pub struct TupleDecoder<C, V> {
 }
 
 impl<C, V> TupleDecoder<C, V> {
-    pub fn into_inner(TupleDecoder { dec, .. }: Self) -> C {
-        dec
+    pub fn into_inner(self) -> C {
+        self.dec
     }
 }
 
