@@ -152,7 +152,7 @@ where
         }
     }
 
-    pub fn into_inner(CoreVecDecoder { dec, .. }: CoreVecDecoder<T>) -> T {
+    pub fn into_inner(CoreVecDecoder { dec, .. }: Self) -> T {
         dec
     }
 }

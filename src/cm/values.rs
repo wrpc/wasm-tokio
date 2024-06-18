@@ -29,9 +29,37 @@ macro_rules! impl_encode_copy_ref {
             #[cfg_attr(
                        feature = "tracing",
                        tracing::instrument(level = "trace", ret, fields(ty = stringify!($t)))
-                    )]
+            )]
             fn encode(&mut self, item: &$t, dst: &mut BytesMut) -> Result<(), Self::Error> {
                 self.encode(*item, dst)
+            }
+        }
+    };
+}
+
+macro_rules! impl_encode_str {
+    ($enc:ident, $t:ty) => {
+        impl Encoder<$t> for $enc {
+            type Error = std::io::Error;
+
+            #[cfg_attr(
+                feature = "tracing",
+                tracing::instrument(level = "trace", ret, fields(ty = "string"))
+            )]
+            fn encode(&mut self, item: $t, dst: &mut BytesMut) -> Result<(), Self::Error> {
+                CoreNameEncoder.encode(item, dst)
+            }
+        }
+
+        impl Encoder<&$t> for $enc {
+            type Error = std::io::Error;
+
+            #[cfg_attr(
+                feature = "tracing",
+                tracing::instrument(level = "trace", ret, fields(ty = "string"))
+            )]
+            fn encode(&mut self, item: &$t, dst: &mut BytesMut) -> Result<(), Self::Error> {
+                CoreNameEncoder.encode(item, dst)
             }
         }
     };
@@ -582,41 +610,8 @@ impl_encode_copy_ref!(PrimValEncoder, f32);
 impl_encode_copy_ref!(PrimValEncoder, f64);
 impl_encode_copy_ref!(PrimValEncoder, char);
 
-impl Encoder<&str> for PrimValEncoder {
-    type Error = std::io::Error;
-
-    #[cfg_attr(
-        feature = "tracing",
-        tracing::instrument(level = "trace", ret, fields(ty = "string"))
-    )]
-    fn encode(&mut self, item: &str, dst: &mut BytesMut) -> Result<(), Self::Error> {
-        CoreNameEncoder.encode(item, dst)
-    }
-}
-
-impl Encoder<&&str> for PrimValEncoder {
-    type Error = std::io::Error;
-
-    #[cfg_attr(
-        feature = "tracing",
-        tracing::instrument(level = "trace", ret, fields(ty = "string"))
-    )]
-    fn encode(&mut self, item: &&str, dst: &mut BytesMut) -> Result<(), Self::Error> {
-        CoreNameEncoder.encode(item, dst)
-    }
-}
-
-impl Encoder<String> for PrimValEncoder {
-    type Error = std::io::Error;
-
-    #[cfg_attr(
-        feature = "tracing",
-        tracing::instrument(level = "trace", ret, fields(ty = "string"))
-    )]
-    fn encode(&mut self, item: String, dst: &mut BytesMut) -> Result<(), Self::Error> {
-        CoreNameEncoder.encode(item, dst)
-    }
-}
+impl_encode_str!(PrimValEncoder, &str);
+impl_encode_str!(PrimValEncoder, String);
 
 #[derive(Copy, Clone, Debug, Default, Eq, PartialEq)]
 pub struct TupleEncoder<T>(pub T);
@@ -651,7 +646,7 @@ pub struct TupleDecoder<C, V> {
 }
 
 impl<C, V> TupleDecoder<C, V> {
-    pub fn into_inner(TupleDecoder { dec, .. }: TupleDecoder<C, V>) -> C {
+    pub fn into_inner(TupleDecoder { dec, .. }: Self) -> C {
         dec
     }
 }
