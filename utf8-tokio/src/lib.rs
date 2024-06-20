@@ -75,6 +75,7 @@ pub trait AsyncWriteUtf8: AsyncWrite {
 
 impl<T: AsyncWrite> AsyncWriteUtf8 for T {}
 
+#[derive(Copy, Clone, Debug, Default, Eq, PartialEq)]
 pub struct Utf8Codec;
 
 impl Decoder for Utf8Codec {
@@ -155,6 +156,22 @@ impl Encoder<char> for Utf8Codec {
     fn encode(&mut self, x: char, dst: &mut BytesMut) -> Result<(), Self::Error> {
         dst.extend_from_slice(x.encode_utf8(&mut [0; 4]).as_bytes());
         Ok(())
+    }
+}
+
+impl Encoder<&char> for Utf8Codec {
+    type Error = std::io::Error;
+
+    fn encode(&mut self, x: &char, dst: &mut BytesMut) -> Result<(), Self::Error> {
+        self.encode(*x, dst)
+    }
+}
+
+impl Encoder<&&char> for Utf8Codec {
+    type Error = std::io::Error;
+
+    fn encode(&mut self, x: &&char, dst: &mut BytesMut) -> Result<(), Self::Error> {
+        self.encode(**x, dst)
     }
 }
 

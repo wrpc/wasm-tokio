@@ -27,11 +27,23 @@ macro_rules! impl_encode_copy_ref {
             type Error = std::io::Error;
 
             #[cfg_attr(
-                       feature = "tracing",
-                       tracing::instrument(level = "trace", ret, fields(ty = stringify!($t)))
+                feature = "tracing",
+                tracing::instrument(level = "trace", ret, fields(ty = stringify!($t)))
             )]
             fn encode(&mut self, item: &$t, dst: &mut BytesMut) -> Result<(), Self::Error> {
                 self.encode(*item, dst)
+            }
+        }
+
+        impl Encoder<&&$t> for $enc {
+            type Error = std::io::Error;
+
+            #[cfg_attr(
+                feature = "tracing",
+                tracing::instrument(level = "trace", ret, fields(ty = stringify!($t)))
+            )]
+            fn encode(&mut self, item: &&$t, dst: &mut BytesMut) -> Result<(), Self::Error> {
+                self.encode(**item, dst)
             }
         }
     };
@@ -183,6 +195,8 @@ impl Encoder<bool> for BoolCodec {
     }
 }
 
+impl_encode_copy_ref!(BoolCodec, bool);
+
 impl Decoder for BoolCodec {
     type Item = bool;
     type Error = std::io::Error;
@@ -214,6 +228,8 @@ impl Encoder<i8> for S8Codec {
         Ok(())
     }
 }
+
+impl_encode_copy_ref!(S8Codec, i8);
 
 impl Decoder for S8Codec {
     type Item = i8;

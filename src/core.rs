@@ -2,6 +2,8 @@ use ::core::future::Future;
 use ::core::mem;
 use ::core::str;
 
+use std::sync::Arc;
+
 use leb128_tokio::{AsyncReadLeb128, Leb128DecoderU32, Leb128Encoder};
 use tokio::io::{AsyncRead, AsyncReadExt as _, AsyncWrite, AsyncWriteExt as _};
 use tokio_util::bytes::{BufMut as _, Bytes, BytesMut};
@@ -90,6 +92,16 @@ impl Encoder<&String> for CoreNameEncoder {
         self.encode(item.as_str(), dst)
     }
 }
+
+impl Encoder<Arc<str>> for CoreNameEncoder {
+    type Error = std::io::Error;
+
+    fn encode(&mut self, item: Arc<str>, dst: &mut BytesMut) -> Result<(), Self::Error> {
+        let item: &str = item.as_ref();
+        self.encode(item, dst)
+    }
+}
+
 
 /// [`core:name`](https://webassembly.github.io/spec/core/binary/values.html#names) decoder
 #[derive(Debug, Default)]
@@ -226,10 +238,37 @@ impl Encoder<Vec<u8>> for CoreVecEncoderBytes {
     }
 }
 
+impl Encoder<&Vec<u8>> for CoreVecEncoderBytes {
+    type Error = std::io::Error;
+
+    fn encode(&mut self, item: &Vec<u8>, dst: &mut BytesMut) -> Result<(), Self::Error> {
+        let item: &[u8] = item.as_ref();
+        self.encode(item, dst)
+    }
+}
+
 impl Encoder<Bytes> for CoreVecEncoderBytes {
     type Error = std::io::Error;
 
     fn encode(&mut self, item: Bytes, dst: &mut BytesMut) -> Result<(), Self::Error> {
+        let item: &[u8] = item.as_ref();
+        self.encode(item, dst)
+    }
+}
+
+impl Encoder<&Bytes> for CoreVecEncoderBytes {
+    type Error = std::io::Error;
+
+    fn encode(&mut self, item: &Bytes, dst: &mut BytesMut) -> Result<(), Self::Error> {
+        let item: &[u8] = item.as_ref();
+        self.encode(item, dst)
+    }
+}
+
+impl Encoder<Arc<[u8]>> for CoreVecEncoderBytes {
+    type Error = std::io::Error;
+
+    fn encode(&mut self, item: Arc<[u8]>, dst: &mut BytesMut) -> Result<(), Self::Error> {
         let item: &[u8] = item.as_ref();
         self.encode(item, dst)
     }
