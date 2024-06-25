@@ -102,7 +102,6 @@ impl Encoder<Arc<str>> for CoreNameEncoder {
     }
 }
 
-
 /// [`core:name`](https://webassembly.github.io/spec/core/binary/values.html#names) decoder
 #[derive(Debug, Default)]
 pub struct CoreNameDecoder(CoreVecDecoderBytes);
@@ -145,7 +144,7 @@ where
 }
 
 /// [`core:vec`](https://webassembly.github.io/spec/core/binary/conventions.html#binary-vec) decoder
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct CoreVecDecoder<T: Decoder> {
     dec: T,
     ret: Vec<T::Item>,
@@ -166,15 +165,6 @@ where
 
     pub fn into_inner(self) -> T {
         self.dec
-    }
-}
-
-impl<T> Default for CoreVecDecoder<T>
-where
-    T: Decoder + Default,
-{
-    fn default() -> Self {
-        Self::new(T::default())
     }
 }
 

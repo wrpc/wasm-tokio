@@ -1130,15 +1130,15 @@ macro_rules! impl_encode {
     };
 }
 
-impl_encode!(u8,   put_u8_leb128);
-impl_encode!(u16,  put_u16_leb128);
-impl_encode!(u32,  put_u32_leb128);
-impl_encode!(u64,  put_u64_leb128);
+impl_encode!(u8, put_u8_leb128);
+impl_encode!(u16, put_u16_leb128);
+impl_encode!(u32, put_u32_leb128);
+impl_encode!(u64, put_u64_leb128);
 impl_encode!(u128, put_u128_leb128);
-impl_encode!(i8,   put_i8_leb128);
-impl_encode!(i16,  put_i16_leb128);
-impl_encode!(i32,  put_i32_leb128);
-impl_encode!(i64,  put_i64_leb128);
+impl_encode!(i8, put_i8_leb128);
+impl_encode!(i16, put_i16_leb128);
+impl_encode!(i32, put_i32_leb128);
+impl_encode!(i64, put_i64_leb128);
 impl_encode!(i128, put_i128_leb128);
 
 #[cfg(test)]

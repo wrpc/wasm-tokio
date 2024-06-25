@@ -1,5 +1,4 @@
 use ::core::future::Future;
-use ::core::mem;
 
 use leb128_tokio::{
     Leb128DecoderI16, Leb128DecoderI32, Leb128DecoderI64, Leb128DecoderU16, Leb128DecoderU32,
@@ -27,9 +26,9 @@ macro_rules! impl_encode_copy_ref {
             type Error = std::io::Error;
 
             #[cfg_attr(
-                feature = "tracing",
-                tracing::instrument(level = "trace", ret, fields(ty = stringify!($t)))
-            )]
+                        feature = "tracing",
+                        tracing::instrument(level = "trace", ret, fields(ty = stringify!($t)))
+                    )]
             fn encode(&mut self, item: &$t, dst: &mut BytesMut) -> Result<(), Self::Error> {
                 self.encode(*item, dst)
             }
@@ -39,9 +38,9 @@ macro_rules! impl_encode_copy_ref {
             type Error = std::io::Error;
 
             #[cfg_attr(
-                feature = "tracing",
-                tracing::instrument(level = "trace", ret, fields(ty = stringify!($t)))
-            )]
+                        feature = "tracing",
+                        tracing::instrument(level = "trace", ret, fields(ty = stringify!($t)))
+                    )]
             fn encode(&mut self, item: &&$t, dst: &mut BytesMut) -> Result<(), Self::Error> {
                 self.encode(**item, dst)
             }
@@ -632,30 +631,7 @@ impl_encode_str!(PrimValEncoder, String);
 #[derive(Copy, Clone, Debug, Default, Eq, PartialEq)]
 pub struct TupleEncoder<T>(pub T);
 
-impl<T> From<(T,)> for TupleEncoder<(T,)> {
-    fn from((e,): (T,)) -> Self {
-        Self((e,))
-    }
-}
-
-impl<C, V> Encoder<(V,)> for TupleEncoder<(C,)>
-where
-    C: Encoder<V>,
-{
-    type Error = C::Error;
-
-    #[cfg_attr(
-        feature = "tracing",
-        tracing::instrument(level = "trace", skip_all, fields(dst, ty = "tuple"))
-    )]
-    fn encode(&mut self, (v,): (V,), dst: &mut BytesMut) -> Result<(), Self::Error> {
-        let (ref mut e,) = self.0;
-        e.encode(v, dst)?;
-        Ok(())
-    }
-}
-
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct TupleDecoder<C, V> {
     dec: C,
     v: V,
@@ -679,49 +655,15 @@ where
     }
 }
 
-impl<C, V> Default for TupleDecoder<C, V>
-where
-    C: Default,
-    V: Default,
-{
-    fn default() -> Self {
-        Self::new(C::default())
-    }
-}
-
-impl<C> Decoder for TupleDecoder<(C,), (Option<C::Item>,)>
-where
-    C: Decoder,
-{
-    type Item = (C::Item,);
-    type Error = C::Error;
-
-    #[cfg_attr(
-        feature = "tracing",
-        tracing::instrument(level = "trace", skip(self), fields(ty = "tuple"))
-    )]
-    fn decode(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
-        let (ref mut v,) = self.v;
-        let (ref mut d,) = self.dec;
-        if v.is_none() {
-            let Some(dv) = d.decode(src)? else {
-                return Ok(None);
-            };
-            *v = Some(dv);
-        }
-        Ok(Some((mem::take(v).unwrap(),)))
-    }
-}
-
 macro_rules! impl_tuple_codec {
     ($($vn:ident),+; $($vt:ident),+; $($cn:ident),+; $($ct:ident),+) => {
-        impl<$($ct),+> From<($($ct),+)> for TupleEncoder<($($ct),+)> {
-            fn from(e: ($($ct),+)) -> Self {
+        impl<$($ct),+> From<($($ct),+,)> for TupleEncoder<($($ct),+,)> {
+            fn from(e: ($($ct),+,)) -> Self {
                Self(e)
             }
         }
 
-        impl<E, $($vt, $ct),+> Encoder<($($vt),+)> for TupleEncoder<($($ct),+)>
+        impl<E, $($vt, $ct),+> Encoder<($($vt),+,)> for TupleEncoder<($($ct),+,)>
         where
             E: From<std::io::Error>,
             $($ct: Encoder<$vt, Error = E>),+
@@ -734,16 +676,16 @@ macro_rules! impl_tuple_codec {
             )]
             fn encode(
                 &mut self,
-                ($($vn),+): ($($vt),+),
+                ($($vn),+,): ($($vt),+,),
                 dst: &mut BytesMut,
             ) -> Result<(), Self::Error> {
-                    let ($(ref mut $cn),+) = self.0;
+                    let ($(ref mut $cn),+,) = self.0;
                     $($cn.encode($vn, dst)?;)+
                     Ok(())
             }
         }
 
-        impl<'a, E, $($vt, $ct),+> Encoder<&'a ($($vt),+)> for TupleEncoder<($($ct),+)>
+        impl<'a, E, $($vt, $ct),+> Encoder<&'a ($($vt),+,)> for TupleEncoder<($($ct),+,)>
         where
             E: From<std::io::Error>,
             $($ct: Encoder<&'a $vt, Error = E>),+
@@ -756,22 +698,22 @@ macro_rules! impl_tuple_codec {
             )]
             fn encode(
                 &mut self,
-                ($($vn),+): &'a ($($vt),+),
+                ($($vn),+,): &'a ($($vt),+,),
                 dst: &mut BytesMut,
             ) -> Result<(), Self::Error> {
-                    let ($(ref mut $cn),+) = self.0;
+                    let ($(ref mut $cn),+,) = self.0;
                     $($cn.encode($vn, dst)?;)+
                     Ok(())
             }
         }
 
-        impl<E, $($ct),+> Decoder for TupleDecoder<($($ct),+), ($(Option<$ct::Item>),+)>
+        impl<E, $($ct),+> Decoder for TupleDecoder<($($ct),+,), ($(Option<$ct::Item>),+,)>
         where
             E: From<std::io::Error>,
-            $($ct: Decoder<Error = E>),+
+            $($ct: Decoder<Error = E>),+,
         {
             type Error = E;
-            type Item = ($($ct::Item),+);
+            type Item = ($($ct::Item),+,);
 
             #[cfg_attr(
                 feature = "tracing",
@@ -781,8 +723,8 @@ macro_rules! impl_tuple_codec {
                 &mut self,
                 src: &mut BytesMut,
             ) -> Result<Option<Self::Item>, Self::Error> {
-                    let ($(ref mut $vn),+) = self.v;
-                    let ($(ref mut $cn),+) = self.dec;
+                    let ($(ref mut $vn),+,) = self.v;
+                    let ($(ref mut $cn),+,) = self.dec;
                     $(
                         if $vn.is_none() {
                             let Some(v) = $cn.decode(src)? else  {
@@ -791,11 +733,18 @@ macro_rules! impl_tuple_codec {
                             *$vn = Some(v);
                         }
                     )+
-                    Ok(Some(($(core::mem::take($vn).unwrap()),+)))
+                    Ok(Some(($($vn.take().unwrap()),+,)))
             }
         }
     };
 }
+
+impl_tuple_codec!(
+    v0;
+    V0;
+    c0;
+    C0
+);
 
 impl_tuple_codec!(
     v0, v1;
@@ -901,6 +850,206 @@ impl_tuple_codec!(
     c0, c1, c2, c3, c4, c5, c6, c7, c8, c9, c10, c11, c12, c13, c14, c15;
     C0, C1, C2, C3, C4, C5, C6, C7, C8, C9, C10, C11, C12, C13, C14, C15
 );
+
+#[derive(Copy, Clone, Debug, Default, Eq, PartialEq)]
+pub struct OptionEncoder<T>(pub T);
+
+impl<C, T> Encoder<Option<T>> for OptionEncoder<C>
+where
+    C: Encoder<T>,
+{
+    type Error = C::Error;
+
+    #[cfg_attr(
+        feature = "tracing",
+        tracing::instrument(level = "trace", skip_all, fields(dst, ty = "option"))
+    )]
+    fn encode(&mut self, v: Option<T>, dst: &mut BytesMut) -> Result<(), Self::Error> {
+        dst.reserve(1);
+        if let Some(v) = v {
+            dst.put_u8(1);
+            self.0.encode(v, dst)
+        } else {
+            dst.put_u8(0);
+            Ok(())
+        }
+    }
+}
+
+#[derive(Debug, Default)]
+pub struct OptionDecoder<T> {
+    dec: T,
+    is_some: bool,
+}
+
+impl<T> OptionDecoder<T> {
+    pub fn into_inner(self) -> T {
+        self.dec
+    }
+}
+
+impl<T> OptionDecoder<T> {
+    pub fn new(decoder: T) -> Self {
+        Self {
+            dec: decoder,
+            is_some: false,
+        }
+    }
+}
+
+impl<T> Decoder for OptionDecoder<T>
+where
+    T: Decoder,
+{
+    type Item = Option<T::Item>;
+    type Error = T::Error;
+
+    #[cfg_attr(
+        feature = "tracing",
+        tracing::instrument(level = "trace", skip(self), fields(ty = "option"))
+    )]
+    fn decode(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
+        if !self.is_some {
+            ensure_capacity!(src, 1_usize);
+            match src.get_u8() {
+                0 => return Ok(Some(None)),
+                1 => {
+                    self.is_some = true;
+                }
+                n => {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        format!("invalid option status byte value `{n}`"),
+                    )
+                    .into())
+                }
+            }
+        }
+        let Some(v) = self.dec.decode(src)? else {
+            return Ok(None);
+        };
+        self.is_some = false;
+        Ok(Some(Some(v)))
+    }
+}
+
+#[derive(Copy, Clone, Debug, Default, Eq, PartialEq)]
+pub struct ResultEncoder<O, E> {
+    pub ok: O,
+    pub err: E,
+}
+
+impl<CO, O, CE, E> Encoder<Result<O, E>> for ResultEncoder<CO, CE>
+where
+    CO: Encoder<O>,
+    CE: Encoder<E>,
+    std::io::Error: From<CO::Error>,
+    std::io::Error: From<CE::Error>,
+{
+    type Error = std::io::Error;
+
+    #[cfg_attr(
+        feature = "tracing",
+        tracing::instrument(level = "trace", skip_all, fields(dst, ty = "result"))
+    )]
+    fn encode(&mut self, v: Result<O, E>, dst: &mut BytesMut) -> Result<(), Self::Error> {
+        dst.reserve(1);
+        match v {
+            Ok(v) => {
+                dst.put_u8(0);
+                self.ok.encode(v, dst)?;
+            }
+            Err(v) => {
+                dst.put_u8(1);
+                self.err.encode(v, dst)?;
+            }
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, Default)]
+pub struct ResultDecoder<O, E> {
+    ok: O,
+    err: E,
+    is_ok: Option<bool>,
+}
+
+impl<O, E> ResultDecoder<O, E> {
+    pub fn into_inner(self) -> (O, E) {
+        (self.ok, self.err)
+    }
+
+    pub fn into_ok(self) -> O {
+        self.ok
+    }
+
+    pub fn into_err(self) -> E {
+        self.err
+    }
+}
+
+impl<O, E> ResultDecoder<O, E> {
+    pub fn new(ok: O, err: E) -> Self {
+        Self {
+            ok,
+            err,
+            is_ok: None,
+        }
+    }
+}
+
+impl<O, E> Decoder for ResultDecoder<O, E>
+where
+    O: Decoder,
+    E: Decoder,
+    std::io::Error: From<O::Error>,
+    std::io::Error: From<E::Error>,
+{
+    type Item = Result<O::Item, E::Item>;
+    type Error = std::io::Error;
+
+    #[cfg_attr(
+        feature = "tracing",
+        tracing::instrument(level = "trace", skip(self), fields(ty = "result"))
+    )]
+    fn decode(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
+        let is_ok = if let Some(is_ok) = self.is_ok {
+            is_ok
+        } else {
+            ensure_capacity!(src, 1_usize);
+            match src.get_u8() {
+                0 => {
+                    self.is_ok = Some(true);
+                    true
+                }
+                1 => {
+                    self.is_ok = Some(false);
+                    false
+                }
+                n => {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        format!("invalid result status byte value `{n}`"),
+                    ))
+                }
+            }
+        };
+        let res = if is_ok {
+            let Some(v) = self.ok.decode(src)? else {
+                return Ok(None);
+            };
+            Ok(v)
+        } else {
+            let Some(v) = self.err.decode(src)? else {
+                return Ok(None);
+            };
+            Err(v)
+        };
+        self.is_ok = None;
+        Ok(Some(res))
+    }
+}
 
 #[cfg(test)]
 mod tests {
