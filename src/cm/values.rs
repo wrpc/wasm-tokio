@@ -5,7 +5,7 @@ use leb128_tokio::{
     Leb128DecoderU64, Leb128Encoder,
 };
 use tokio::io::{AsyncRead, AsyncReadExt as _, AsyncWrite, AsyncWriteExt as _};
-use tokio_util::bytes::{Buf as _, BufMut as _, BytesMut};
+use tokio_util::bytes::{Buf as _, BufMut as _, Bytes, BytesMut};
 use tokio_util::codec::{Decoder, Encoder};
 use utf8_tokio::Utf8Codec;
 
@@ -612,6 +612,151 @@ impl Encoder<char> for PrimValEncoder {
     }
 }
 
+#[derive(Copy, Clone, Debug, Default, Eq, PartialEq)]
+pub struct FlagEncoder;
+
+impl Encoder<u8> for FlagEncoder {
+    type Error = std::io::Error;
+
+    #[cfg_attr(
+        feature = "tracing",
+        tracing::instrument(level = "trace", skip_all, fields(dst, ty = "flags"))
+    )]
+    fn encode(&mut self, item: u8, dst: &mut BytesMut) -> Result<(), Self::Error> {
+        dst.reserve(1);
+        dst.put_u8(item);
+        Ok(())
+    }
+}
+
+impl Encoder<u16> for FlagEncoder {
+    type Error = std::io::Error;
+
+    #[cfg_attr(
+        feature = "tracing",
+        tracing::instrument(level = "trace", skip_all, fields(dst, ty = "flags"))
+    )]
+    fn encode(&mut self, item: u16, dst: &mut BytesMut) -> Result<(), Self::Error> {
+        dst.reserve(2);
+        dst.put_u16_le(item);
+        Ok(())
+    }
+}
+
+impl Encoder<u32> for FlagEncoder {
+    type Error = std::io::Error;
+
+    #[cfg_attr(
+        feature = "tracing",
+        tracing::instrument(level = "trace", skip_all, fields(dst, ty = "flags"))
+    )]
+    fn encode(&mut self, item: u32, dst: &mut BytesMut) -> Result<(), Self::Error> {
+        dst.reserve(4);
+        dst.put_u32_le(item);
+        Ok(())
+    }
+}
+
+impl Encoder<u64> for FlagEncoder {
+    type Error = std::io::Error;
+
+    #[cfg_attr(
+        feature = "tracing",
+        tracing::instrument(level = "trace", skip_all, fields(dst, ty = "flags"))
+    )]
+    fn encode(&mut self, item: u64, dst: &mut BytesMut) -> Result<(), Self::Error> {
+        dst.reserve(8);
+        dst.put_u64_le(item);
+        Ok(())
+    }
+}
+
+impl Encoder<u128> for FlagEncoder {
+    type Error = std::io::Error;
+
+    #[cfg_attr(
+        feature = "tracing",
+        tracing::instrument(level = "trace", skip_all, fields(dst, ty = "flags"))
+    )]
+    fn encode(&mut self, item: u128, dst: &mut BytesMut) -> Result<(), Self::Error> {
+        dst.reserve(16);
+        dst.put_u128_le(item);
+        Ok(())
+    }
+}
+
+impl Encoder<Vec<u8>> for FlagEncoder {
+    type Error = std::io::Error;
+
+    #[cfg_attr(
+        feature = "tracing",
+        tracing::instrument(level = "trace", skip_all, fields(dst, ty = "flags"))
+    )]
+    fn encode(&mut self, item: Vec<u8>, dst: &mut BytesMut) -> Result<(), Self::Error> {
+        dst.extend_from_slice(&item);
+        Ok(())
+    }
+}
+
+impl Encoder<&[u8]> for FlagEncoder {
+    type Error = std::io::Error;
+
+    #[cfg_attr(
+        feature = "tracing",
+        tracing::instrument(level = "trace", skip_all, fields(dst, ty = "flags"))
+    )]
+    fn encode(&mut self, item: &[u8], dst: &mut BytesMut) -> Result<(), Self::Error> {
+        dst.extend_from_slice(item);
+        Ok(())
+    }
+}
+
+impl Encoder<Bytes> for FlagEncoder {
+    type Error = std::io::Error;
+
+    #[cfg_attr(
+        feature = "tracing",
+        tracing::instrument(level = "trace", skip_all, fields(dst, ty = "flags"))
+    )]
+    fn encode(&mut self, item: Bytes, dst: &mut BytesMut) -> Result<(), Self::Error> {
+        dst.extend_from_slice(&item);
+        Ok(())
+    }
+}
+
+impl Encoder<&Bytes> for FlagEncoder {
+    type Error = std::io::Error;
+
+    #[cfg_attr(
+        feature = "tracing",
+        tracing::instrument(level = "trace", skip_all, fields(dst, ty = "flags"))
+    )]
+    fn encode(&mut self, item: &Bytes, dst: &mut BytesMut) -> Result<(), Self::Error> {
+        dst.extend_from_slice(item);
+        Ok(())
+    }
+}
+
+#[derive(Copy, Clone, Debug, Default, Eq, PartialEq)]
+pub struct FlagDecoder<const N: usize>;
+
+impl<const N: usize> Decoder for FlagDecoder<N> {
+    type Item = Bytes;
+    type Error = std::io::Error;
+
+    #[cfg_attr(
+        feature = "tracing",
+        tracing::instrument(level = "trace", skip_all, fields(dst, ty = "flags"))
+    )]
+    fn decode(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
+        let n = if N % 8 == 0 { N / 8 } else { N / 8 + 1 };
+        if src.len() < n {
+            ensure_capacity!(src, n);
+        }
+        Ok(Some(src.split_to(n).freeze()))
+    }
+}
+
 impl_encode_copy_ref!(PrimValEncoder, bool);
 impl_encode_copy_ref!(PrimValEncoder, i8);
 impl_encode_copy_ref!(PrimValEncoder, u8);
@@ -624,6 +769,12 @@ impl_encode_copy_ref!(PrimValEncoder, u64);
 impl_encode_copy_ref!(PrimValEncoder, f32);
 impl_encode_copy_ref!(PrimValEncoder, f64);
 impl_encode_copy_ref!(PrimValEncoder, char);
+
+impl_encode_copy_ref!(FlagEncoder, u8);
+impl_encode_copy_ref!(FlagEncoder, u16);
+impl_encode_copy_ref!(FlagEncoder, u32);
+impl_encode_copy_ref!(FlagEncoder, u64);
+impl_encode_copy_ref!(FlagEncoder, u128);
 
 impl_encode_str!(PrimValEncoder, &str);
 impl_encode_str!(PrimValEncoder, String);
