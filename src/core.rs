@@ -144,7 +144,7 @@ where
 }
 
 /// [`core:vec`](https://webassembly.github.io/spec/core/binary/conventions.html#binary-vec) decoder
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct CoreVecDecoder<T: Decoder> {
     dec: T,
     ret: Vec<T::Item>,
@@ -165,6 +165,15 @@ where
 
     pub fn into_inner(self) -> T {
         self.dec
+    }
+}
+
+impl<T> Default for CoreVecDecoder<T>
+where
+    T: Decoder + Default,
+{
+    fn default() -> Self {
+        Self::new(T::default())
     }
 }
 
