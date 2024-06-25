@@ -876,6 +876,28 @@ where
     }
 }
 
+impl<'a, C, T> Encoder<&'a Option<T>> for OptionEncoder<C>
+where
+    C: Encoder<&'a T>,
+{
+    type Error = C::Error;
+
+    #[cfg_attr(
+        feature = "tracing",
+        tracing::instrument(level = "trace", skip_all, fields(dst, ty = "option"))
+    )]
+    fn encode(&mut self, v: &'a Option<T>, dst: &mut BytesMut) -> Result<(), Self::Error> {
+        dst.reserve(1);
+        if let Some(v) = v {
+            dst.put_u8(1);
+            self.0.encode(v, dst)
+        } else {
+            dst.put_u8(0);
+            Ok(())
+        }
+    }
+}
+
 #[derive(Debug, Default)]
 pub struct OptionDecoder<T> {
     dec: T,
@@ -953,6 +975,35 @@ where
         tracing::instrument(level = "trace", skip_all, fields(dst, ty = "result"))
     )]
     fn encode(&mut self, v: Result<O, E>, dst: &mut BytesMut) -> Result<(), Self::Error> {
+        dst.reserve(1);
+        match v {
+            Ok(v) => {
+                dst.put_u8(0);
+                self.ok.encode(v, dst)?;
+            }
+            Err(v) => {
+                dst.put_u8(1);
+                self.err.encode(v, dst)?;
+            }
+        }
+        Ok(())
+    }
+}
+
+impl<'a, CO, O, CE, E> Encoder<&'a Result<O, E>> for ResultEncoder<CO, CE>
+where
+    CO: Encoder<&'a O>,
+    CE: Encoder<&'a E>,
+    std::io::Error: From<CO::Error>,
+    std::io::Error: From<CE::Error>,
+{
+    type Error = std::io::Error;
+
+    #[cfg_attr(
+        feature = "tracing",
+        tracing::instrument(level = "trace", skip_all, fields(dst, ty = "result"))
+    )]
+    fn encode(&mut self, v: &'a Result<O, E>, dst: &mut BytesMut) -> Result<(), Self::Error> {
         dst.reserve(1);
         match v {
             Ok(v) => {

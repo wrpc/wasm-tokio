@@ -123,10 +123,80 @@ impl Decoder for CoreNameDecoder {
 /// [`core:vec`](https://webassembly.github.io/spec/core/binary/conventions.html#binary-vec) encoder
 pub struct CoreVecEncoder<E>(pub E);
 
+impl<E, T, const N: usize> Encoder<[T; N]> for CoreVecEncoder<E>
+where
+    E: Encoder<T>,
+    std::io::Error: From<E::Error>,
+{
+    type Error = std::io::Error;
+
+    fn encode(&mut self, item: [T; N], dst: &mut BytesMut) -> Result<(), Self::Error> {
+        dst.reserve(5 + N);
+        let len = u32::try_from(N)
+            .map_err(|err| std::io::Error::new(std::io::ErrorKind::InvalidInput, err))?;
+        Leb128Encoder.encode(len, dst)?;
+        for item in item {
+            self.0.encode(item, dst)?;
+        }
+        Ok(())
+    }
+}
+
+impl<E, T> Encoder<Vec<T>> for CoreVecEncoder<E>
+where
+    E: Encoder<T>,
+    std::io::Error: From<E::Error>,
+{
+    type Error = std::io::Error;
+
+    fn encode(&mut self, item: Vec<T>, dst: &mut BytesMut) -> Result<(), Self::Error> {
+        let len = item.len();
+        dst.reserve(5 + len);
+        let len = u32::try_from(len)
+            .map_err(|err| std::io::Error::new(std::io::ErrorKind::InvalidInput, err))?;
+        Leb128Encoder.encode(len, dst)?;
+        for item in item {
+            self.0.encode(item, dst)?;
+        }
+        Ok(())
+    }
+}
+
+impl<E, T> Encoder<Box<[T]>> for CoreVecEncoder<E>
+where
+    E: Encoder<T>,
+    std::io::Error: From<E::Error>,
+{
+    type Error = std::io::Error;
+
+    fn encode(&mut self, item: Box<[T]>, dst: &mut BytesMut) -> Result<(), Self::Error> {
+        self.encode(Vec::from(item), dst)
+    }
+}
+
+impl<'a, E, T, const N: usize> Encoder<&'a [T; N]> for CoreVecEncoder<E>
+where
+    E: Encoder<&'a T>,
+    std::io::Error: From<E::Error>,
+{
+    type Error = std::io::Error;
+
+    fn encode(&mut self, item: &'a [T; N], dst: &mut BytesMut) -> Result<(), Self::Error> {
+        dst.reserve(5 + N);
+        let len = u32::try_from(N)
+            .map_err(|err| std::io::Error::new(std::io::ErrorKind::InvalidInput, err))?;
+        Leb128Encoder.encode(len, dst)?;
+        for item in item {
+            self.0.encode(item, dst)?;
+        }
+        Ok(())
+    }
+}
+
 impl<'a, E, T> Encoder<&'a [T]> for CoreVecEncoder<E>
 where
     E: Encoder<&'a T>,
-    E::Error: Into<std::io::Error>,
+    std::io::Error: From<E::Error>,
 {
     type Error = std::io::Error;
 
@@ -137,9 +207,68 @@ where
             .map_err(|err| std::io::Error::new(std::io::ErrorKind::InvalidInput, err))?;
         Leb128Encoder.encode(len, dst)?;
         for item in item {
-            self.0.encode(item, dst).map_err(Into::into)?;
+            self.0.encode(item, dst)?;
         }
         Ok(())
+    }
+}
+
+impl<'a, E, T> Encoder<&'a Vec<T>> for CoreVecEncoder<E>
+where
+    E: Encoder<&'a T>,
+    std::io::Error: From<E::Error>,
+{
+    type Error = std::io::Error;
+
+    fn encode(&mut self, item: &'a Vec<T>, dst: &mut BytesMut) -> Result<(), Self::Error> {
+        self.encode(item.as_slice(), dst)
+    }
+}
+
+impl<'a, E, T> Encoder<&'a Box<[T]>> for CoreVecEncoder<E>
+where
+    E: Encoder<&'a T>,
+    std::io::Error: From<E::Error>,
+{
+    type Error = std::io::Error;
+
+    fn encode(&mut self, item: &'a Box<[T]>, dst: &mut BytesMut) -> Result<(), Self::Error> {
+        let item: &[T] = item.as_ref();
+        self.encode(item, dst)
+    }
+}
+
+impl<E, T> Encoder<Arc<[T]>> for CoreVecEncoder<E>
+where
+    for<'a> E: Encoder<&'a T>,
+    for<'a> std::io::Error: From<<E as Encoder<&'a T>>::Error>,
+{
+    type Error = std::io::Error;
+
+    fn encode(&mut self, item: Arc<[T]>, dst: &mut BytesMut) -> Result<(), Self::Error> {
+        let item = item.as_ref();
+        let len = item.len();
+        dst.reserve(5 + len);
+        let len = u32::try_from(len)
+            .map_err(|err| std::io::Error::new(std::io::ErrorKind::InvalidInput, err))?;
+        Leb128Encoder.encode(len, dst)?;
+        for item in item {
+            self.0.encode(item, dst)?;
+        }
+        Ok(())
+    }
+}
+
+impl<'a, E, T> Encoder<&'a Arc<[T]>> for CoreVecEncoder<E>
+where
+    E: Encoder<&'a T>,
+    std::io::Error: From<E::Error>,
+{
+    type Error = std::io::Error;
+
+    fn encode(&mut self, item: &'a Arc<[T]>, dst: &mut BytesMut) -> Result<(), Self::Error> {
+        let item: &[T] = item.as_ref();
+        self.encode(item, dst)
     }
 }
 
