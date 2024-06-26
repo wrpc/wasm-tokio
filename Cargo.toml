@@ -1,6 +1,6 @@
 [package]
 name = "wasm-tokio"
-version = "0.5.13"
+version = "0.5.14"
 description = "Streaming WebAssembly codec based on Tokio"
 
 authors.workspace = true

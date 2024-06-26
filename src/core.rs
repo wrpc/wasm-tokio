@@ -213,6 +213,18 @@ where
     }
 }
 
+impl<'a, 'b, E, T> Encoder<&'a &'b [T]> for CoreVecEncoder<E>
+where
+    E: Encoder<&'b T>,
+    std::io::Error: From<E::Error>,
+{
+    type Error = std::io::Error;
+
+    fn encode(&mut self, item: &'a &'b [T], dst: &mut BytesMut) -> Result<(), Self::Error> {
+        self.encode(*item, dst)
+    }
+}
+
 impl<'a, E, T> Encoder<&'a Vec<T>> for CoreVecEncoder<E>
 where
     E: Encoder<&'a T>,
@@ -221,6 +233,18 @@ where
     type Error = std::io::Error;
 
     fn encode(&mut self, item: &'a Vec<T>, dst: &mut BytesMut) -> Result<(), Self::Error> {
+        self.encode(item.as_slice(), dst)
+    }
+}
+
+impl<'a, 'b, E, T> Encoder<&'a &'b Vec<T>> for CoreVecEncoder<E>
+where
+    E: Encoder<&'b T>,
+    std::io::Error: From<E::Error>,
+{
+    type Error = std::io::Error;
+
+    fn encode(&mut self, item: &'a &'b Vec<T>, dst: &mut BytesMut) -> Result<(), Self::Error> {
         self.encode(item.as_slice(), dst)
     }
 }
