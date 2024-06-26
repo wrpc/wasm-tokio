@@ -779,10 +779,10 @@ impl_encode_copy_ref!(FlagEncoder, u128);
 impl_encode_str!(PrimValEncoder, &str);
 impl_encode_str!(PrimValEncoder, String);
 
-#[derive(Copy, Clone, Debug, Default, Eq, PartialEq)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub struct TupleEncoder<T>(pub T);
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct TupleDecoder<C, V> {
     dec: C,
     v: V,
@@ -808,6 +808,15 @@ where
 
 macro_rules! impl_tuple_codec {
     ($($vn:ident),+; $($vt:ident),+; $($cn:ident),+; $($ct:ident),+) => {
+        impl<$($ct),+> Default for TupleEncoder::<($($ct),+,)>
+        where
+            $($ct: Default),+
+        {
+            fn default() -> Self {
+                Self(($($ct::default()),+,))
+            }
+        }
+
         impl<$($ct),+> From<($($ct),+,)> for TupleEncoder<($($ct),+,)> {
             fn from(e: ($($ct),+,)) -> Self {
                Self(e)
@@ -855,6 +864,18 @@ macro_rules! impl_tuple_codec {
                     let ($(ref mut $cn),+,) = self.0;
                     $($cn.encode($vn, dst)?;)+
                     Ok(())
+            }
+        }
+
+        impl<$($ct),+> Default for TupleDecoder<($($ct),+,), ($(Option<$ct::Item>),+,)>
+        where
+            $($ct: Decoder + Default),+,
+        {
+            fn default() -> Self {
+                Self{
+                    dec: ($($ct::default()),+,),
+                    v: ($(Option::<$ct::Item>::None),+,),
+                }
             }
         }
 
