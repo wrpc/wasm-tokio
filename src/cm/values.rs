@@ -14,8 +14,10 @@ use crate::CoreNameEncoder;
 macro_rules! ensure_capacity {
     ($src:ident, $n:expr) => {
         if let Some(n) = $n.checked_sub($src.len()) {
-            $src.reserve(n);
-            return Ok(None);
+            if n > 0 {
+                $src.reserve(n);
+                return Ok(None);
+            }
         }
     };
 }
@@ -1283,15 +1285,37 @@ mod tests {
     #[test_log::test]
     fn tuple() {
         let mut buf = BytesMut::default();
-        TupleEncoder((BoolCodec, PrimValEncoder, CoreNameEncoder, Leb128Encoder))
-            .encode((true, 0xfeu8, "test", 0x42u32), &mut buf)
-            .expect("failed to encode tuple");
-        assert_eq!(buf.as_ref(), b"\x01\xfe\x04test\x42");
-        let (a, b, c, d) = TupleDecoder::new((
+        TupleEncoder((
+            BoolCodec,
+            PrimValEncoder,
+            CoreNameEncoder,
+            Leb128Encoder,
+            TupleEncoder((ResultEncoder {
+                ok: BoolCodec,
+                err: CoreNameEncoder,
+            },)),
+        ))
+        .encode(
+            (
+                true,
+                0xfeu8,
+                "test",
+                0x42u32,
+                (Result::<_, String>::Ok(true),),
+            ),
+            &mut buf,
+        )
+        .expect("failed to encode tuple");
+        assert_eq!(buf.as_ref(), b"\x01\xfe\x04test\x42\0\x01");
+        let (a, b, c, d, (e,)) = TupleDecoder::new((
             BoolCodec,
             U8Codec,
             CoreNameDecoder::default(),
             Leb128DecoderU32,
+            TupleDecoder::<
+                (ResultDecoder<BoolCodec, CoreNameDecoder>,),
+                (Option<Result<bool, String>>,),
+            >::default(),
         ))
         .decode(&mut buf)
         .expect("failed to decode tuple")
@@ -1300,5 +1324,6 @@ mod tests {
         assert_eq!(b, 0xfe);
         assert_eq!(c, "test");
         assert_eq!(d, 0x42);
+        assert_eq!(e, Ok(true));
     }
 }
