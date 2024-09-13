@@ -54,10 +54,11 @@ impl<T: AsyncWrite> AsyncWriteCore for T {}
 #[derive(Copy, Clone, Debug, Default, Eq, PartialEq)]
 pub struct CoreNameEncoder;
 
-impl Encoder<&str> for CoreNameEncoder {
+impl<T: AsRef<str>> Encoder<T> for CoreNameEncoder {
     type Error = std::io::Error;
 
-    fn encode(&mut self, item: &str, dst: &mut BytesMut) -> Result<(), Self::Error> {
+    fn encode(&mut self, item: T, dst: &mut BytesMut) -> Result<(), Self::Error> {
+        let item = item.as_ref();
         let len = item.len();
         let n: u32 = len
             .try_into()
@@ -66,39 +67,6 @@ impl Encoder<&str> for CoreNameEncoder {
         Leb128Encoder.encode(n, dst)?;
         dst.put(item.as_bytes());
         Ok(())
-    }
-}
-
-impl Encoder<&&str> for CoreNameEncoder {
-    type Error = std::io::Error;
-
-    fn encode(&mut self, item: &&str, dst: &mut BytesMut) -> Result<(), Self::Error> {
-        self.encode(*item, dst)
-    }
-}
-
-impl Encoder<String> for CoreNameEncoder {
-    type Error = std::io::Error;
-
-    fn encode(&mut self, item: String, dst: &mut BytesMut) -> Result<(), Self::Error> {
-        self.encode(item.as_str(), dst)
-    }
-}
-
-impl Encoder<&String> for CoreNameEncoder {
-    type Error = std::io::Error;
-
-    fn encode(&mut self, item: &String, dst: &mut BytesMut) -> Result<(), Self::Error> {
-        self.encode(item.as_str(), dst)
-    }
-}
-
-impl Encoder<Arc<str>> for CoreNameEncoder {
-    type Error = std::io::Error;
-
-    fn encode(&mut self, item: Arc<str>, dst: &mut BytesMut) -> Result<(), Self::Error> {
-        let item: &str = item.as_ref();
-        self.encode(item, dst)
     }
 }
 
@@ -445,19 +413,25 @@ mod tests {
         tx.send("foo").await.expect("failed to send `foo`");
 
         trace!("sending ``");
-        tx.send("").await.expect("failed to send ``");
+        tx.send(String::default()).await.expect("failed to send ``");
 
         trace!("sending `test`");
-        tx.send("test").await.expect("failed to send `test`");
+        tx.send(&&&&&&"test").await.expect("failed to send `test`");
 
         trace!("sending `bar`");
-        tx.send("bar").await.expect("failed to send `bar`");
+        tx.send(Arc::from("bar"))
+            .await
+            .expect("failed to send `bar`");
 
         trace!("sending `ƒ𐍈Ő`");
-        tx.send("ƒ𐍈Ő").await.expect("failed to send `ƒ𐍈Ő`");
+        tx.send(&&String::from("ƒ𐍈Ő"))
+            .await
+            .expect("failed to send `ƒ𐍈Ő`");
 
         trace!("sending `baz`");
-        tx.send("baz").await.expect("failed to send `baz`");
+        tx.send(&&&Arc::from("baz"))
+            .await
+            .expect("failed to send `baz`");
 
         let tx = tx.into_inner();
         assert_eq!(
