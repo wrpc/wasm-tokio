@@ -367,10 +367,11 @@ where
 #[derive(Copy, Clone, Debug, Default, Eq, PartialEq)]
 pub struct CoreVecEncoderBytes;
 
-impl Encoder<&[u8]> for CoreVecEncoderBytes {
+impl<T: AsRef<[u8]>> Encoder<T> for CoreVecEncoderBytes {
     type Error = std::io::Error;
 
-    fn encode(&mut self, item: &[u8], dst: &mut BytesMut) -> Result<(), Self::Error> {
+    fn encode(&mut self, item: T, dst: &mut BytesMut) -> Result<(), Self::Error> {
+        let item = item.as_ref();
         let n = item.len();
         let n = u32::try_from(n)
             .map_err(|err| std::io::Error::new(std::io::ErrorKind::InvalidInput, err))?;
@@ -378,51 +379,6 @@ impl Encoder<&[u8]> for CoreVecEncoderBytes {
         Leb128Encoder.encode(n, dst)?;
         dst.extend_from_slice(item);
         Ok(())
-    }
-}
-
-impl Encoder<Vec<u8>> for CoreVecEncoderBytes {
-    type Error = std::io::Error;
-
-    fn encode(&mut self, item: Vec<u8>, dst: &mut BytesMut) -> Result<(), Self::Error> {
-        let item: &[u8] = item.as_ref();
-        self.encode(item, dst)
-    }
-}
-
-impl Encoder<&Vec<u8>> for CoreVecEncoderBytes {
-    type Error = std::io::Error;
-
-    fn encode(&mut self, item: &Vec<u8>, dst: &mut BytesMut) -> Result<(), Self::Error> {
-        let item: &[u8] = item.as_ref();
-        self.encode(item, dst)
-    }
-}
-
-impl Encoder<Bytes> for CoreVecEncoderBytes {
-    type Error = std::io::Error;
-
-    fn encode(&mut self, item: Bytes, dst: &mut BytesMut) -> Result<(), Self::Error> {
-        let item: &[u8] = item.as_ref();
-        self.encode(item, dst)
-    }
-}
-
-impl Encoder<&Bytes> for CoreVecEncoderBytes {
-    type Error = std::io::Error;
-
-    fn encode(&mut self, item: &Bytes, dst: &mut BytesMut) -> Result<(), Self::Error> {
-        let item: &[u8] = item.as_ref();
-        self.encode(item, dst)
-    }
-}
-
-impl Encoder<Arc<[u8]>> for CoreVecEncoderBytes {
-    type Error = std::io::Error;
-
-    fn encode(&mut self, item: Arc<[u8]>, dst: &mut BytesMut) -> Result<(), Self::Error> {
-        let item: &[u8] = item.as_ref();
-        self.encode(item, dst)
     }
 }
 
