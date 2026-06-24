@@ -380,7 +380,7 @@ pub trait AsyncReadLeb128: AsyncRead {
             let mut s = 0u8;
             for _ in 0..2 {
                 let b = self.read_u8().await?;
-                if s == 7 && b > 0x01 {
+                if s == 7 && b & 0x7f != 0x00 && b & 0x7f != 0x7f {
                     return Err(invalid_data(Overflow::<8>));
                 }
                 x |= ((b as i8) & 0x7f) << s;
@@ -410,7 +410,7 @@ pub trait AsyncReadLeb128: AsyncRead {
             let mut s = 0u8;
             for _ in 0..3 {
                 let b = self.read_u8().await?;
-                if s == 14 && b > 0x03 {
+                if s == 14 && (b & 0x7f) >> 1 != 0x00 && (b & 0x7f) >> 1 != 0x3f {
                     return Err(invalid_data(Overflow::<16>));
                 }
                 x |= (i16::from(b) & 0x7f) << s;
@@ -440,7 +440,7 @@ pub trait AsyncReadLeb128: AsyncRead {
             let mut s = 0u8;
             for _ in 0..5 {
                 let b = self.read_u8().await?;
-                if s == 28 && b > 0x0f {
+                if s == 28 && (b & 0x7f) >> 3 != 0x00 && (b & 0x7f) >> 3 != 0x0f {
                     return Err(invalid_data(Overflow::<32>));
                 }
                 x |= (i32::from(b) & 0x7f) << s;
@@ -470,7 +470,7 @@ pub trait AsyncReadLeb128: AsyncRead {
             let mut s = 0u8;
             for _ in 0..10 {
                 let b = self.read_u8().await?;
-                if s == 63 && b > 0x01 {
+                if s == 63 && b & 0x7f != 0x00 && b & 0x7f != 0x7f {
                     return Err(invalid_data(Overflow::<64>));
                 }
                 x |= (i64::from(b) & 0x7f) << s;
@@ -500,7 +500,7 @@ pub trait AsyncReadLeb128: AsyncRead {
             let mut s = 0u8;
             for _ in 0..19 {
                 let b = self.read_u8().await?;
-                if s == 126 && b > 0x03 {
+                if s == 126 && (b & 0x7f) >> 1 != 0x00 && (b & 0x7f) >> 1 != 0x3f {
                     return Err(invalid_data(Overflow::<128>));
                 }
                 x |= (i128::from(b) & 0x7f) << s;
@@ -953,7 +953,7 @@ impl Decoder for Leb128DecoderI8 {
                 src.reserve(1);
                 return Ok(None);
             };
-            if s == 7 && b > 0x01 {
+            if s == 7 && b & 0x7f != 0x00 && b & 0x7f != 0x7f {
                 return Err(invalid_data(Overflow::<8>));
             }
             x |= ((b as i8) & 0x7f) << s;
@@ -985,7 +985,7 @@ impl Decoder for Leb128DecoderI16 {
                 src.reserve(1);
                 return Ok(None);
             };
-            if s == 14 && b > 0x03 {
+            if s == 14 && (b & 0x7f) >> 1 != 0x00 && (b & 0x7f) >> 1 != 0x3f {
                 return Err(invalid_data(Overflow::<16>));
             }
             x |= (i16::from(b) & 0x7f) << s;
@@ -1017,7 +1017,7 @@ impl Decoder for Leb128DecoderI32 {
                 src.reserve(1);
                 return Ok(None);
             };
-            if s == 28 && b > 0x0f {
+            if s == 28 && (b & 0x7f) >> 3 != 0x00 && (b & 0x7f) >> 3 != 0x0f {
                 return Err(invalid_data(Overflow::<32>));
             }
             x |= (i32::from(b) & 0x7f) << s;
@@ -1049,7 +1049,7 @@ impl Decoder for Leb128DecoderI64 {
                 src.reserve(1);
                 return Ok(None);
             };
-            if s == 63 && b > 0x01 {
+            if s == 63 && b & 0x7f != 0x00 && b & 0x7f != 0x7f {
                 return Err(invalid_data(Overflow::<64>));
             }
             x |= (i64::from(b) & 0x7f) << s;
@@ -1081,7 +1081,7 @@ impl Decoder for Leb128DecoderI128 {
                 src.reserve(1);
                 return Ok(None);
             };
-            if s == 126 && b > 0x03 {
+            if s == 126 && (b & 0x7f) >> 1 != 0x00 && (b & 0x7f) >> 1 != 0x3f {
                 return Err(invalid_data(Overflow::<128>));
             }
             x |= (i128::from(b) & 0x7f) << s;
@@ -1323,12 +1323,12 @@ mod tests {
         buf.write_i64_leb128(-2).await.expect("failed to write i64");
         assert_eq!(buf, [0x7e]);
 
-        let v = [0xff, 0x01]
+        let v = [0x80, 0x7f]
             .as_slice()
             .read_i8_leb128()
             .await
             .expect("failed to read i8");
-        assert_eq!(v, -1);
+        assert_eq!(v, i8::MIN);
 
         let v = [0x7f]
             .as_slice()
@@ -1357,14 +1357,14 @@ mod tests {
             .expect("failed to read i16");
         assert_eq!(v, 0x7fff);
 
-        let v = [0xff, 0xff, 0x02]
+        let v = [0xff, 0xff, 0x7e]
             .as_slice()
             .read_i16_leb128()
             .await
             .expect("failed to read i16");
         assert_eq!(v, -0x4001);
 
-        let v = [0xff, 0xff, 0x03]
+        let v = [0xff, 0xff, 0x7f]
             .as_slice()
             .read_i16_leb128()
             .await
@@ -1391,14 +1391,14 @@ mod tests {
             .expect("failed to read i32");
         assert_eq!(v, -2);
 
-        let v = [0xff, 0xff, 0xff, 0xff, 0x0f]
+        let v = [0xff, 0xff, 0xff, 0xff, 0x7f]
             .as_slice()
             .read_i32_leb128()
             .await
             .expect("failed to read i32");
         assert_eq!(v, -1);
 
-        let v = [0xfe, 0xff, 0xff, 0xff, 0x0f]
+        let v = [0xfe, 0xff, 0xff, 0xff, 0x7f]
             .as_slice()
             .read_i32_leb128()
             .await
@@ -1411,7 +1411,7 @@ mod tests {
             .await
             .expect_err("i32 read should have failed, since it encoded 33 bits");
 
-        let v = [0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x01]
+        let v = [0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x7f]
             .as_slice()
             .read_i64_leb128()
             .await
@@ -1426,7 +1426,7 @@ mod tests {
 
         let v = [
             0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
-            0xff, 0xff, 0xff, 0xff, 0x03,
+            0xff, 0xff, 0xff, 0xff, 0x7f,
         ]
         .as_slice()
         .read_i128_leb128()
@@ -1442,6 +1442,66 @@ mod tests {
         .read_i128_leb128()
         .await
         .expect_err("i128 read should have failed, since it encoded 129 bits");
+    }
+
+    // Regression test for the signed-decoder overflow check rejecting
+    // canonical sign-extended encodings of large-magnitude negative values
+    // (e.g. `i16::MIN`). Every value must round-trip through the encoder and
+    // both decode paths (`read_*_leb128` and the `Decoder` impls).
+    #[tokio::test]
+    async fn signed_leb128_roundtrip() {
+        macro_rules! roundtrip {
+            ($write:ident, $read:ident, $decoder:ident, $values:expr) => {
+                for v in $values {
+                    let mut buf = vec![];
+                    buf.$write(v).await.expect("failed to encode");
+
+                    let got = buf
+                        .as_slice()
+                        .$read()
+                        .await
+                        .expect("failed to read back encoded value");
+                    assert_eq!(got, v, "async read mismatch for {v}, encoded as {buf:02x?}");
+
+                    let got = $decoder
+                        .decode(&mut buf.as_slice().into())
+                        .expect("failed to decode back encoded value")
+                        .expect("decoder returned no value");
+                    assert_eq!(got, v, "Decoder mismatch for {v}, encoded as {buf:02x?}");
+                }
+            };
+        }
+
+        roundtrip!(
+            write_i8_leb128,
+            read_i8_leb128,
+            Leb128DecoderI8,
+            [i8::MIN, i8::MAX, -1, 0, 1, -64, -65, 63, 64]
+        );
+        roundtrip!(
+            write_i16_leb128,
+            read_i16_leb128,
+            Leb128DecoderI16,
+            [i16::MIN, i16::MAX, -1, 0, 1, -8192, -8193, 8191, 8192, -16385]
+        );
+        roundtrip!(
+            write_i32_leb128,
+            read_i32_leb128,
+            Leb128DecoderI32,
+            [i32::MIN, i32::MAX, -1, 0, 1, -2, -123_456]
+        );
+        roundtrip!(
+            write_i64_leb128,
+            read_i64_leb128,
+            Leb128DecoderI64,
+            [i64::MIN, i64::MAX, -1, 0, 1, -123_456]
+        );
+        roundtrip!(
+            write_i128_leb128,
+            read_i128_leb128,
+            Leb128DecoderI128,
+            [i128::MIN, i128::MAX, -1, 0, 1]
+        );
     }
 
     #[tokio::test]
