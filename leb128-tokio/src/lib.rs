@@ -1482,7 +1482,18 @@ mod tests {
             write_i16_leb128,
             read_i16_leb128,
             Leb128DecoderI16,
-            [i16::MIN, i16::MAX, -1, 0, 1, -8192, -8193, 8191, 8192, -16385]
+            [
+                i16::MIN,
+                i16::MAX,
+                -1,
+                0,
+                1,
+                -8192,
+                -8193,
+                8191,
+                8192,
+                -16385
+            ]
         );
         roundtrip!(
             write_i32_leb128,
