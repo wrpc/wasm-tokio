@@ -21,8 +21,9 @@ pub trait AsyncReadCore: AsyncRead {
     {
         async move {
             let n = self.read_u32_leb128().await?;
-            s.reserve(n.try_into().unwrap_or(usize::MAX));
-            self.take(n.into()).read_to_string(s).await?;
+            if self.take(n.into()).read_to_string(s).await? != n as usize {
+                return Err(std::io::ErrorKind::UnexpectedEof.into());
+            }
             Ok(())
         }
     }
@@ -316,7 +317,6 @@ where
             let len = len
                 .try_into()
                 .map_err(|err| std::io::Error::new(std::io::ErrorKind::InvalidInput, err))?;
-            self.ret = Vec::with_capacity(len);
             self.cap = len;
         }
         while self.cap > 0 {
@@ -372,9 +372,7 @@ impl Decoder for CoreVecDecoderBytes {
                 .map_err(|err| std::io::Error::new(std::io::ErrorKind::InvalidInput, err))?;
             self.0 = len;
         }
-        let n = self.0.saturating_sub(src.len());
-        if n > 0 {
-            src.reserve(n);
+        if src.len() < self.0 {
             return Ok(None);
         }
         let buf = src.split_to(self.0);
@@ -536,5 +534,34 @@ mod tests {
 
         let s = rx.try_next().await.expect("failed to get EOF");
         assert_eq!(s, None);
+    }
+
+    #[test_log::test(tokio::test)]
+    async fn string_truncated() {
+        let mut s = String::default();
+        let err = b"\xff\xff\xff\xff\x0ftest"
+            .as_slice()
+            .read_core_name(&mut s)
+            .await
+            .expect_err("truncated string must fail");
+        assert_eq!(err.kind(), std::io::ErrorKind::UnexpectedEof);
+    }
+
+    #[test_log::test(tokio::test)]
+    async fn vec_truncated() {
+        let mut rx = FramedRead::new(
+            b"\xff\xff\xff\xff\x0f\x03fo".as_slice(),
+            CoreVecDecoder::<CoreNameDecoder>::default(),
+        );
+        rx.try_next().await.expect_err("truncated vec must fail");
+    }
+
+    #[test_log::test(tokio::test)]
+    async fn bytes_truncated() {
+        let mut rx = FramedRead::new(
+            b"\xff\xff\xff\xff\x0ftest".as_slice(),
+            CoreVecDecoderBytes::default(),
+        );
+        rx.try_next().await.expect_err("truncated bytes must fail");
     }
 }
