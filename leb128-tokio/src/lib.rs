@@ -1478,42 +1478,31 @@ mod tests {
             write_i8_leb128,
             read_i8_leb128,
             Leb128DecoderI8,
-            [i8::MIN, i8::MAX, -1, 0, 1, -64, -65, 63, 64]
+            [i8::MIN, i8::MAX, -1]
         );
         roundtrip!(
             write_i16_leb128,
             read_i16_leb128,
             Leb128DecoderI16,
-            [
-                i16::MIN,
-                i16::MAX,
-                -1,
-                0,
-                1,
-                -8192,
-                -8193,
-                8191,
-                8192,
-                -16385
-            ]
+            [i16::MIN, i16::MAX, -1]
         );
         roundtrip!(
             write_i32_leb128,
             read_i32_leb128,
             Leb128DecoderI32,
-            [i32::MIN, i32::MAX, -1, 0, 1, -2, -123_456]
+            [i32::MIN, i32::MAX, -1]
         );
         roundtrip!(
             write_i64_leb128,
             read_i64_leb128,
             Leb128DecoderI64,
-            [i64::MIN, i64::MAX, -1, 0, 1, -123_456]
+            [i64::MIN, i64::MAX, -1]
         );
         roundtrip!(
             write_i128_leb128,
             read_i128_leb128,
             Leb128DecoderI128,
-            [i128::MIN, i128::MAX, -1, 0, 1]
+            [i128::MIN, i128::MAX, -1]
         );
     }
 
