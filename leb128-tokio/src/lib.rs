@@ -68,8 +68,9 @@ fn invalid_data(err: impl Sync + Send + std::error::Error + 'static) -> std::io:
 }
 
 fn is_sign_extended(b: u8, bits: u8) -> bool {
-    let rest = (b & 0x7f) >> (bits - 1);
-    rest == 0 || rest == 0x7f >> (bits - 1)
+    let shift = bits.saturating_sub(1);
+    let rest = (b & 0x7f) >> shift;
+    rest == 0 || rest == 0x7f >> shift
 }
 
 pub trait AsyncReadLeb128: AsyncRead {
