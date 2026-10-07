@@ -265,15 +265,23 @@ where
     }
 }
 
+/// Default maximum number of bytes decoders preallocate based on a length read from the input
+pub const DEFAULT_MAX_INITIAL_CAPACITY: usize = 1 << 20;
+
 /// [`core:vec`](https://webassembly.github.io/spec/core/binary/conventions.html#binary-vec) decoder
+///
+/// At most `MAX_INITIAL_CAPACITY` bytes are preallocated based on the vector length read from the input
 #[derive(Debug)]
-pub struct CoreVecDecoder<T: Decoder> {
+pub struct CoreVecDecoder<
+    T: Decoder,
+    const MAX_INITIAL_CAPACITY: usize = DEFAULT_MAX_INITIAL_CAPACITY,
+> {
     dec: T,
     ret: Vec<T::Item>,
     cap: usize,
 }
 
-impl<T> CoreVecDecoder<T>
+impl<T, const MAX_INITIAL_CAPACITY: usize> CoreVecDecoder<T, MAX_INITIAL_CAPACITY>
 where
     T: Decoder,
 {
@@ -290,7 +298,7 @@ where
     }
 }
 
-impl<T> Default for CoreVecDecoder<T>
+impl<T, const MAX_INITIAL_CAPACITY: usize> Default for CoreVecDecoder<T, MAX_INITIAL_CAPACITY>
 where
     T: Decoder + Default,
 {
@@ -299,7 +307,7 @@ where
     }
 }
 
-impl<T> Decoder for CoreVecDecoder<T>
+impl<T, const MAX_INITIAL_CAPACITY: usize> Decoder for CoreVecDecoder<T, MAX_INITIAL_CAPACITY>
 where
     T: Decoder,
 {
@@ -318,6 +326,9 @@ where
                 .try_into()
                 .map_err(|err| std::io::Error::new(std::io::ErrorKind::InvalidInput, err))?;
             self.cap = len;
+            self.ret = Vec::with_capacity(
+                len.min(MAX_INITIAL_CAPACITY / mem::size_of::<T::Item>().max(1)),
+            );
         }
         while self.cap > 0 {
             let Some(v) = self.dec.decode(src)? else {
@@ -352,10 +363,14 @@ impl<T: AsRef<[u8]>> Encoder<T> for CoreVecEncoderBytes {
 
 /// [`core:vec`](https://webassembly.github.io/spec/core/binary/conventions.html#binary-vec)
 /// decoder optimized for vectors of byte-sized values
+///
+/// At most `MAX_INITIAL_CAPACITY` bytes are preallocated based on the vector length read from the input
 #[derive(Debug, Default)]
-pub struct CoreVecDecoderBytes(usize);
+pub struct CoreVecDecoderBytes<const MAX_INITIAL_CAPACITY: usize = DEFAULT_MAX_INITIAL_CAPACITY>(
+    usize,
+);
 
-impl Decoder for CoreVecDecoderBytes {
+impl<const MAX_INITIAL_CAPACITY: usize> Decoder for CoreVecDecoderBytes<MAX_INITIAL_CAPACITY> {
     type Item = Bytes;
     type Error = std::io::Error;
 
@@ -373,6 +388,7 @@ impl Decoder for CoreVecDecoderBytes {
             self.0 = len;
         }
         if src.len() < self.0 {
+            src.reserve((self.0 - src.len()).min(MAX_INITIAL_CAPACITY));
             return Ok(None);
         }
         let buf = src.split_to(self.0);
@@ -548,6 +564,19 @@ mod tests {
     }
 
     #[test_log::test(tokio::test)]
+    async fn vec_capped() {
+        let mut rx = FramedRead::new(
+            b"\x03\x01a\x01b\x01c".as_slice(),
+            CoreVecDecoder::<CoreNameDecoder, 1>::default(),
+        );
+        let vs = rx.try_next().await.unwrap().unwrap();
+        assert_eq!(vs, ["a", "b", "c"]);
+        let mut rx = FramedRead::new(b"\x04test".as_slice(), CoreVecDecoderBytes::<1>::default());
+        let buf = rx.try_next().await.unwrap().unwrap();
+        assert_eq!(buf, b"test".as_slice());
+    }
+
+    #[test_log::test(tokio::test)]
     async fn vec_truncated() {
         let mut rx = FramedRead::new(
             b"\xff\xff\xff\xff\x0f\x03fo".as_slice(),
@@ -558,7 +587,7 @@ mod tests {
 
     #[test_log::test(tokio::test)]
     async fn bytes_truncated() {
-        let mut rx = FramedRead::new(
+        let mut rx: FramedRead<_, CoreVecDecoderBytes> = FramedRead::new(
             b"\xff\xff\xff\xff\x0ftest".as_slice(),
             CoreVecDecoderBytes::default(),
         );
