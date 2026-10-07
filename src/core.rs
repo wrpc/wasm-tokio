@@ -21,8 +21,9 @@ pub trait AsyncReadCore: AsyncRead {
     {
         async move {
             let n = self.read_u32_leb128().await?;
-            let mut buf = Vec::with_capacity((n as usize).min(DEFAULT_MAX_INITIAL_CAPACITY));
-            if self.take(n.into()).read_to_end(&mut buf).await? != n as usize {
+            let len = usize::try_from(n).unwrap_or(usize::MAX);
+            let mut buf = Vec::with_capacity(len.min(DEFAULT_MAX_INITIAL_CAPACITY));
+            if self.take(n.into()).read_to_end(&mut buf).await? != len {
                 return Err(std::io::ErrorKind::UnexpectedEof.into());
             }
             let buf = String::from_utf8(buf)
@@ -435,7 +436,7 @@ impl<const MAX_INITIAL_CAPACITY: usize> Decoder for CoreVecDecoderBytes<MAX_INIT
             self.0 = len;
         }
         if src.len() < self.0 {
-            src.reserve((self.0 - src.len()).min(MAX_INITIAL_CAPACITY));
+            src.reserve(self.0.saturating_sub(src.len()).min(MAX_INITIAL_CAPACITY));
             return Ok(None);
         }
         let buf = src.split_to(self.0);
