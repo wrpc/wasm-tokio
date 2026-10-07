@@ -67,6 +67,11 @@ fn invalid_data(err: impl Sync + Send + std::error::Error + 'static) -> std::io:
     std::io::Error::new(std::io::ErrorKind::InvalidData, err)
 }
 
+fn is_sign_extended(b: u8, bits: u8) -> bool {
+    let rest = (b & 0x7f) >> (bits - 1);
+    rest == 0 || rest == 0x7f >> (bits - 1)
+}
+
 pub trait AsyncReadLeb128: AsyncRead {
     #[cfg_attr(
         feature = "tracing",
@@ -380,7 +385,7 @@ pub trait AsyncReadLeb128: AsyncRead {
             let mut s = 0u8;
             for _ in 0..2 {
                 let b = self.read_u8().await?;
-                if s == 7 && b & 0x7f != 0x00 && b & 0x7f != 0x7f {
+                if s == 7 && !is_sign_extended(b, 1) {
                     return Err(invalid_data(Overflow::<8>));
                 }
                 x |= ((b as i8) & 0x7f) << s;
@@ -410,7 +415,7 @@ pub trait AsyncReadLeb128: AsyncRead {
             let mut s = 0u8;
             for _ in 0..3 {
                 let b = self.read_u8().await?;
-                if s == 14 && (b & 0x7f) >> 1 != 0x00 && (b & 0x7f) >> 1 != 0x3f {
+                if s == 14 && !is_sign_extended(b, 2) {
                     return Err(invalid_data(Overflow::<16>));
                 }
                 x |= (i16::from(b) & 0x7f) << s;
@@ -440,7 +445,7 @@ pub trait AsyncReadLeb128: AsyncRead {
             let mut s = 0u8;
             for _ in 0..5 {
                 let b = self.read_u8().await?;
-                if s == 28 && (b & 0x7f) >> 3 != 0x00 && (b & 0x7f) >> 3 != 0x0f {
+                if s == 28 && !is_sign_extended(b, 4) {
                     return Err(invalid_data(Overflow::<32>));
                 }
                 x |= (i32::from(b) & 0x7f) << s;
@@ -470,7 +475,7 @@ pub trait AsyncReadLeb128: AsyncRead {
             let mut s = 0u8;
             for _ in 0..10 {
                 let b = self.read_u8().await?;
-                if s == 63 && b & 0x7f != 0x00 && b & 0x7f != 0x7f {
+                if s == 63 && !is_sign_extended(b, 1) {
                     return Err(invalid_data(Overflow::<64>));
                 }
                 x |= (i64::from(b) & 0x7f) << s;
@@ -500,7 +505,7 @@ pub trait AsyncReadLeb128: AsyncRead {
             let mut s = 0u8;
             for _ in 0..19 {
                 let b = self.read_u8().await?;
-                if s == 126 && (b & 0x7f) >> 1 != 0x00 && (b & 0x7f) >> 1 != 0x3f {
+                if s == 126 && !is_sign_extended(b, 2) {
                     return Err(invalid_data(Overflow::<128>));
                 }
                 x |= (i128::from(b) & 0x7f) << s;
@@ -953,7 +958,7 @@ impl Decoder for Leb128DecoderI8 {
                 src.reserve(1);
                 return Ok(None);
             };
-            if s == 7 && b & 0x7f != 0x00 && b & 0x7f != 0x7f {
+            if s == 7 && !is_sign_extended(b, 1) {
                 return Err(invalid_data(Overflow::<8>));
             }
             x |= ((b as i8) & 0x7f) << s;
@@ -985,7 +990,7 @@ impl Decoder for Leb128DecoderI16 {
                 src.reserve(1);
                 return Ok(None);
             };
-            if s == 14 && (b & 0x7f) >> 1 != 0x00 && (b & 0x7f) >> 1 != 0x3f {
+            if s == 14 && !is_sign_extended(b, 2) {
                 return Err(invalid_data(Overflow::<16>));
             }
             x |= (i16::from(b) & 0x7f) << s;
@@ -1017,7 +1022,7 @@ impl Decoder for Leb128DecoderI32 {
                 src.reserve(1);
                 return Ok(None);
             };
-            if s == 28 && (b & 0x7f) >> 3 != 0x00 && (b & 0x7f) >> 3 != 0x0f {
+            if s == 28 && !is_sign_extended(b, 4) {
                 return Err(invalid_data(Overflow::<32>));
             }
             x |= (i32::from(b) & 0x7f) << s;
@@ -1049,7 +1054,7 @@ impl Decoder for Leb128DecoderI64 {
                 src.reserve(1);
                 return Ok(None);
             };
-            if s == 63 && b & 0x7f != 0x00 && b & 0x7f != 0x7f {
+            if s == 63 && !is_sign_extended(b, 1) {
                 return Err(invalid_data(Overflow::<64>));
             }
             x |= (i64::from(b) & 0x7f) << s;
@@ -1081,7 +1086,7 @@ impl Decoder for Leb128DecoderI128 {
                 src.reserve(1);
                 return Ok(None);
             };
-            if s == 126 && (b & 0x7f) >> 1 != 0x00 && (b & 0x7f) >> 1 != 0x3f {
+            if s == 126 && !is_sign_extended(b, 2) {
                 return Err(invalid_data(Overflow::<128>));
             }
             x |= (i128::from(b) & 0x7f) << s;
@@ -1444,10 +1449,6 @@ mod tests {
         .expect_err("i128 read should have failed, since it encoded 129 bits");
     }
 
-    // Regression test for the signed-decoder overflow check rejecting
-    // canonical sign-extended encodings of large-magnitude negative values
-    // (e.g. `i16::MIN`). Every value must round-trip through the encoder and
-    // both decode paths (`read_*_leb128` and the `Decoder` impls).
     #[tokio::test]
     async fn signed_leb128_roundtrip() {
         macro_rules! roundtrip {
