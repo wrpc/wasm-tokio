@@ -751,11 +751,7 @@ impl<const N: usize> Decoder for FlagDecoder<N> {
         tracing::instrument(level = "trace", skip_all, fields(dst, ty = "flags"))
     )]
     fn decode(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
-        let n = if N.is_multiple_of(8) {
-            N / 8
-        } else {
-            N / 8 + 1
-        };
+        let n = N.div_ceil(8);
         if src.len() < n {
             ensure_capacity!(src, n);
         }
