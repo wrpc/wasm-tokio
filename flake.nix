@@ -4,7 +4,6 @@
     "https://nixify.cachix.org"
     "https://crane.cachix.org"
     "https://nix-community.cachix.org"
-
   ];
   nixConfig.extra-trusted-substituters = [
     "https://bytecodealliance.cachix.org"
