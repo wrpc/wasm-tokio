@@ -21,9 +21,13 @@ pub trait AsyncReadCore: AsyncRead {
     {
         async move {
             let n = self.read_u32_leb128().await?;
-            if self.take(n.into()).read_to_string(s).await? != n as usize {
+            let mut buf = Vec::with_capacity((n as usize).min(DEFAULT_MAX_INITIAL_CAPACITY));
+            if self.take(n.into()).read_to_end(&mut buf).await? != n as usize {
                 return Err(std::io::ErrorKind::UnexpectedEof.into());
             }
+            let buf = String::from_utf8(buf)
+                .map_err(|err| std::io::Error::new(std::io::ErrorKind::InvalidData, err))?;
+            s.push_str(&buf);
             Ok(())
         }
     }
@@ -72,10 +76,26 @@ impl<T: AsRef<str>> Encoder<T> for CoreNameEncoder {
 }
 
 /// [`core:name`](https://webassembly.github.io/spec/core/binary/values.html#names) decoder
-#[derive(Debug, Default)]
-pub struct CoreNameDecoder(CoreVecDecoderBytes);
+///
+/// At most `MAX_INITIAL_CAPACITY` bytes are preallocated based on the name length read from the input
+#[derive(Debug)]
+pub struct CoreNameDecoder<const MAX_INITIAL_CAPACITY: usize = DEFAULT_MAX_INITIAL_CAPACITY>(
+    CoreVecDecoderBytes<MAX_INITIAL_CAPACITY>,
+);
 
-impl Decoder for CoreNameDecoder {
+impl Default for CoreNameDecoder {
+    fn default() -> Self {
+        Self::capped()
+    }
+}
+
+impl<const MAX_INITIAL_CAPACITY: usize> CoreNameDecoder<MAX_INITIAL_CAPACITY> {
+    pub fn capped() -> Self {
+        Self(CoreVecDecoderBytes::capped())
+    }
+}
+
+impl<const MAX_INITIAL_CAPACITY: usize> Decoder for CoreNameDecoder<MAX_INITIAL_CAPACITY> {
     type Item = String;
     type Error = std::io::Error;
 
@@ -281,11 +301,20 @@ pub struct CoreVecDecoder<
     cap: usize,
 }
 
-impl<T, const MAX_INITIAL_CAPACITY: usize> CoreVecDecoder<T, MAX_INITIAL_CAPACITY>
+impl<T> CoreVecDecoder<T>
 where
     T: Decoder,
 {
     pub fn new(decoder: T) -> Self {
+        Self::capped(decoder)
+    }
+}
+
+impl<T, const MAX_INITIAL_CAPACITY: usize> CoreVecDecoder<T, MAX_INITIAL_CAPACITY>
+where
+    T: Decoder,
+{
+    pub fn capped(decoder: T) -> Self {
         Self {
             dec: decoder,
             ret: Vec::default(),
@@ -298,7 +327,7 @@ where
     }
 }
 
-impl<T, const MAX_INITIAL_CAPACITY: usize> Default for CoreVecDecoder<T, MAX_INITIAL_CAPACITY>
+impl<T> Default for CoreVecDecoder<T>
 where
     T: Decoder + Default,
 {
@@ -331,8 +360,14 @@ where
             );
         }
         while self.cap > 0 {
-            let Some(v) = self.dec.decode(src)? else {
-                return Ok(None);
+            let v = match self.dec.decode(src) {
+                Ok(Some(v)) => v,
+                Ok(None) => return Ok(None),
+                Err(err) => {
+                    self.cap = 0;
+                    self.ret = Vec::default();
+                    return Err(err);
+                }
             };
             self.ret.push(v);
             self.cap -= 1;
@@ -365,10 +400,22 @@ impl<T: AsRef<[u8]>> Encoder<T> for CoreVecEncoderBytes {
 /// decoder optimized for vectors of byte-sized values
 ///
 /// At most `MAX_INITIAL_CAPACITY` bytes are preallocated based on the vector length read from the input
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct CoreVecDecoderBytes<const MAX_INITIAL_CAPACITY: usize = DEFAULT_MAX_INITIAL_CAPACITY>(
     usize,
 );
+
+impl Default for CoreVecDecoderBytes {
+    fn default() -> Self {
+        Self::capped()
+    }
+}
+
+impl<const MAX_INITIAL_CAPACITY: usize> CoreVecDecoderBytes<MAX_INITIAL_CAPACITY> {
+    pub fn capped() -> Self {
+        Self(0)
+    }
+}
 
 impl<const MAX_INITIAL_CAPACITY: usize> Decoder for CoreVecDecoderBytes<MAX_INITIAL_CAPACITY> {
     type Item = Bytes;
@@ -561,19 +608,60 @@ mod tests {
             .await
             .expect_err("truncated string must fail");
         assert_eq!(err.kind(), std::io::ErrorKind::UnexpectedEof);
+
+        let mut s = String::from("x");
+        let err = b"\x0aabc"
+            .as_slice()
+            .read_core_name(&mut s)
+            .await
+            .expect_err("truncated string must fail");
+        assert_eq!(err.kind(), std::io::ErrorKind::UnexpectedEof);
+        assert_eq!(s, "x");
+
+        let err = b"\x04\xe2\x82"
+            .as_slice()
+            .read_core_name(&mut s)
+            .await
+            .expect_err("truncated string must fail");
+        assert_eq!(err.kind(), std::io::ErrorKind::UnexpectedEof);
     }
 
     #[test_log::test(tokio::test)]
     async fn vec_capped() {
         let mut rx = FramedRead::new(
             b"\x03\x01a\x01b\x01c".as_slice(),
-            CoreVecDecoder::<CoreNameDecoder, 1>::default(),
+            CoreVecDecoder::<_, 1>::capped(CoreNameDecoder::<1>::capped()),
         );
         let vs = rx.try_next().await.unwrap().unwrap();
         assert_eq!(vs, ["a", "b", "c"]);
-        let mut rx = FramedRead::new(b"\x04test".as_slice(), CoreVecDecoderBytes::<1>::default());
+        let mut rx = FramedRead::new(b"\x04test".as_slice(), CoreVecDecoderBytes::<1>::capped());
         let buf = rx.try_next().await.unwrap().unwrap();
         assert_eq!(buf, b"test".as_slice());
+
+        let mut dec = CoreVecDecoder::<_, 64>::capped(CoreNameDecoder::<64>::capped());
+        let mut src = BytesMut::from(b"\xff\xff\xff\xff\x0f\xff\xff\xff\xff\x0f".as_slice());
+        assert!(dec.decode(&mut src).unwrap().is_none());
+        assert!(dec.ret.capacity() <= 64 / mem::size_of::<String>());
+        assert!(src.capacity() <= 128);
+    }
+
+    #[test_log::test(tokio::test)]
+    async fn vec_reset_on_error() {
+        let mut dec = CoreVecDecoder::<CoreNameDecoder>::default();
+        let mut src = BytesMut::from(b"\x03\x01a\x01\xff".as_slice());
+        dec.decode(&mut src).expect_err("invalid UTF-8 must fail");
+        let mut src = BytesMut::from(b"\x01\x01b".as_slice());
+        assert_eq!(dec.decode(&mut src).unwrap().unwrap(), ["b"]);
+    }
+
+    #[test_log::test(tokio::test)]
+    async fn inference() {
+        let _ = FramedRead::new(b"".as_slice(), CoreVecDecoderBytes::default());
+        let _ = FramedRead::new(b"".as_slice(), CoreNameDecoder::default());
+        let _ = FramedRead::new(
+            b"".as_slice(),
+            CoreVecDecoder::new(CoreNameDecoder::default()),
+        );
     }
 
     #[test_log::test(tokio::test)]
@@ -587,7 +675,7 @@ mod tests {
 
     #[test_log::test(tokio::test)]
     async fn bytes_truncated() {
-        let mut rx: FramedRead<_, CoreVecDecoderBytes> = FramedRead::new(
+        let mut rx = FramedRead::new(
             b"\xff\xff\xff\xff\x0ftest".as_slice(),
             CoreVecDecoderBytes::default(),
         );
