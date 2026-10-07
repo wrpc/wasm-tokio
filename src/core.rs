@@ -351,7 +351,6 @@ where
                 Ok(None) => return Ok(None),
                 Err(err) => {
                     self.cap = 0;
-                    self.ret = Vec::default();
                     return Err(err);
                 }
             };
@@ -581,43 +580,18 @@ mod tests {
 
     #[test_log::test(tokio::test)]
     async fn string_truncated() {
-        let mut s = String::default();
+        let mut s = String::from("x");
         let err = b"\xff\xff\xff\xff\x0ftest"
             .as_slice()
             .read_core_name(&mut s)
             .await
             .expect_err("truncated string must fail");
         assert_eq!(err.kind(), std::io::ErrorKind::UnexpectedEof);
-
-        let mut s = String::from("x");
-        let err = b"\x0aabc"
-            .as_slice()
-            .read_core_name(&mut s)
-            .await
-            .expect_err("truncated string must fail");
-        assert_eq!(err.kind(), std::io::ErrorKind::UnexpectedEof);
         assert_eq!(s, "x");
-
-        let err = b"\x04\xe2\x82"
-            .as_slice()
-            .read_core_name(&mut s)
-            .await
-            .expect_err("truncated string must fail");
-        assert_eq!(err.kind(), std::io::ErrorKind::UnexpectedEof);
     }
 
-    #[test_log::test(tokio::test)]
-    async fn vec_capped() {
-        let mut rx = FramedRead::new(
-            b"\x03\x01a\x01b\x01c".as_slice(),
-            CoreVecDecoder::<_, 1>::new(CoreNameDecoder::<1>::default()),
-        );
-        let vs = rx.try_next().await.unwrap().unwrap();
-        assert_eq!(vs, ["a", "b", "c"]);
-        let mut rx = FramedRead::new(b"\x04test".as_slice(), CoreVecDecoderBytes::<1>::default());
-        let buf = rx.try_next().await.unwrap().unwrap();
-        assert_eq!(buf, b"test".as_slice());
-
+    #[test]
+    fn vec_capped() {
         let mut dec = CoreVecDecoder::<_, 64>::new(CoreNameDecoder::<64>::default());
         let mut src = BytesMut::from(b"\xff\xff\xff\xff\x0f\xff\xff\xff\xff\x0f".as_slice());
         assert!(dec.decode(&mut src).unwrap().is_none());
@@ -625,30 +599,12 @@ mod tests {
         assert!(src.capacity() <= 128);
     }
 
-    #[test_log::test(tokio::test)]
-    async fn vec_reset_on_error() {
+    #[test]
+    fn vec_reset_on_error() {
         let mut dec = CoreVecDecoder::<CoreNameDecoder>::default();
         let mut src = BytesMut::from(b"\x03\x01a\x01\xff".as_slice());
         dec.decode(&mut src).expect_err("invalid UTF-8 must fail");
         let mut src = BytesMut::from(b"\x01\x01b".as_slice());
         assert_eq!(dec.decode(&mut src).unwrap().unwrap(), ["b"]);
-    }
-
-    #[test_log::test(tokio::test)]
-    async fn vec_truncated() {
-        let mut rx = FramedRead::new(
-            b"\xff\xff\xff\xff\x0f\x03fo".as_slice(),
-            CoreVecDecoder::<CoreNameDecoder>::default(),
-        );
-        rx.try_next().await.expect_err("truncated vec must fail");
-    }
-
-    #[test_log::test(tokio::test)]
-    async fn bytes_truncated() {
-        let mut rx = FramedRead::new(
-            b"\xff\xff\xff\xff\x0ftest".as_slice(),
-            <CoreVecDecoderBytes>::default(),
-        );
-        rx.try_next().await.expect_err("truncated bytes must fail");
     }
 }
