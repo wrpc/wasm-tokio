@@ -84,15 +84,9 @@ pub struct CoreNameDecoder<const MAX_INITIAL_CAPACITY: usize = DEFAULT_MAX_INITI
     CoreVecDecoderBytes<MAX_INITIAL_CAPACITY>,
 );
 
-impl Default for CoreNameDecoder {
+impl<const MAX_INITIAL_CAPACITY: usize> Default for CoreNameDecoder<MAX_INITIAL_CAPACITY> {
     fn default() -> Self {
-        Self::capped()
-    }
-}
-
-impl<const MAX_INITIAL_CAPACITY: usize> CoreNameDecoder<MAX_INITIAL_CAPACITY> {
-    pub fn capped() -> Self {
-        Self(CoreVecDecoderBytes::capped())
+        Self(CoreVecDecoderBytes::default())
     }
 }
 
@@ -302,20 +296,11 @@ pub struct CoreVecDecoder<
     cap: usize,
 }
 
-impl<T> CoreVecDecoder<T>
-where
-    T: Decoder,
-{
-    pub fn new(decoder: T) -> Self {
-        Self::capped(decoder)
-    }
-}
-
 impl<T, const MAX_INITIAL_CAPACITY: usize> CoreVecDecoder<T, MAX_INITIAL_CAPACITY>
 where
     T: Decoder,
 {
-    pub fn capped(decoder: T) -> Self {
+    pub fn new(decoder: T) -> Self {
         Self {
             dec: decoder,
             ret: Vec::default(),
@@ -328,7 +313,7 @@ where
     }
 }
 
-impl<T> Default for CoreVecDecoder<T>
+impl<T, const MAX_INITIAL_CAPACITY: usize> Default for CoreVecDecoder<T, MAX_INITIAL_CAPACITY>
 where
     T: Decoder + Default,
 {
@@ -406,14 +391,8 @@ pub struct CoreVecDecoderBytes<const MAX_INITIAL_CAPACITY: usize = DEFAULT_MAX_I
     usize,
 );
 
-impl Default for CoreVecDecoderBytes {
+impl<const MAX_INITIAL_CAPACITY: usize> Default for CoreVecDecoderBytes<MAX_INITIAL_CAPACITY> {
     fn default() -> Self {
-        Self::capped()
-    }
-}
-
-impl<const MAX_INITIAL_CAPACITY: usize> CoreVecDecoderBytes<MAX_INITIAL_CAPACITY> {
-    pub fn capped() -> Self {
         Self(0)
     }
 }
@@ -500,7 +479,7 @@ mod tests {
             tx,
             concat!("\x03foo", "\0", "\x04test", "\x03bar", "\x08ƒ𐍈Ő", "\x03baz").as_bytes()
         );
-        let mut rx = FramedRead::new(tx.as_slice(), CoreNameDecoder::default());
+        let mut rx = FramedRead::new(tx.as_slice(), <CoreNameDecoder>::default());
 
         trace!("reading `foo`");
         let s = rx.try_next().await.expect("failed to get `foo`");
@@ -631,15 +610,15 @@ mod tests {
     async fn vec_capped() {
         let mut rx = FramedRead::new(
             b"\x03\x01a\x01b\x01c".as_slice(),
-            CoreVecDecoder::<_, 1>::capped(CoreNameDecoder::<1>::capped()),
+            CoreVecDecoder::<_, 1>::new(CoreNameDecoder::<1>::default()),
         );
         let vs = rx.try_next().await.unwrap().unwrap();
         assert_eq!(vs, ["a", "b", "c"]);
-        let mut rx = FramedRead::new(b"\x04test".as_slice(), CoreVecDecoderBytes::<1>::capped());
+        let mut rx = FramedRead::new(b"\x04test".as_slice(), CoreVecDecoderBytes::<1>::default());
         let buf = rx.try_next().await.unwrap().unwrap();
         assert_eq!(buf, b"test".as_slice());
 
-        let mut dec = CoreVecDecoder::<_, 64>::capped(CoreNameDecoder::<64>::capped());
+        let mut dec = CoreVecDecoder::<_, 64>::new(CoreNameDecoder::<64>::default());
         let mut src = BytesMut::from(b"\xff\xff\xff\xff\x0f\xff\xff\xff\xff\x0f".as_slice());
         assert!(dec.decode(&mut src).unwrap().is_none());
         assert!(dec.ret.capacity() <= 64 / mem::size_of::<String>());
@@ -656,16 +635,6 @@ mod tests {
     }
 
     #[test_log::test(tokio::test)]
-    async fn inference() {
-        let _ = FramedRead::new(b"".as_slice(), CoreVecDecoderBytes::default());
-        let _ = FramedRead::new(b"".as_slice(), CoreNameDecoder::default());
-        let _ = FramedRead::new(
-            b"".as_slice(),
-            CoreVecDecoder::new(CoreNameDecoder::default()),
-        );
-    }
-
-    #[test_log::test(tokio::test)]
     async fn vec_truncated() {
         let mut rx = FramedRead::new(
             b"\xff\xff\xff\xff\x0f\x03fo".as_slice(),
@@ -678,7 +647,7 @@ mod tests {
     async fn bytes_truncated() {
         let mut rx = FramedRead::new(
             b"\xff\xff\xff\xff\x0ftest".as_slice(),
-            CoreVecDecoderBytes::default(),
+            <CoreVecDecoderBytes>::default(),
         );
         rx.try_next().await.expect_err("truncated bytes must fail");
     }

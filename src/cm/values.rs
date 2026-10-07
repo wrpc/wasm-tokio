@@ -1310,7 +1310,7 @@ mod tests {
         let (a, b, c, d, (e,)) = TupleDecoder::new((
             BoolCodec,
             U8Codec,
-            CoreNameDecoder::default(),
+            <CoreNameDecoder>::default(),
             Leb128DecoderU32,
             TupleDecoder::<
                 (ResultDecoder<BoolCodec, CoreNameDecoder>,),
