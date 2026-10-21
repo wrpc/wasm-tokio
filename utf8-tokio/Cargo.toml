@@ -1,6 +1,6 @@
 [package]
 name = "utf8-tokio"
-version = "0.2.1"
+version = "0.3.0"
 description = "Streaming UTF-8 codec based on Tokio"
 
 authors.workspace = true

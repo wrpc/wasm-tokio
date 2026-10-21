@@ -22,6 +22,22 @@ macro_rules! ensure_capacity {
     };
 }
 
+fn stateless_decode_eof<D>(dec: &mut D, buf: &mut BytesMut) -> Result<Option<D::Item>, D::Error>
+where
+    D: Decoder,
+{
+    match dec.decode(buf)? {
+        Some(frame) => Ok(Some(frame)),
+        None => {
+            if buf.is_empty() {
+                Ok(None)
+            } else {
+                Err(std::io::Error::from(std::io::ErrorKind::UnexpectedEof).into())
+            }
+        }
+    }
+}
+
 macro_rules! impl_encode_copy_ref {
     ($enc:ident, $t:ty) => {
         impl Encoder<&$t> for $enc {
@@ -295,6 +311,11 @@ impl Decoder for S16Codec {
     fn decode(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
         Leb128DecoderI16.decode(src)
     }
+
+    #[cfg_attr(feature = "tracing", tracing::instrument(level = "trace", ret))]
+    fn decode_eof(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
+        Leb128DecoderI16.decode_eof(src)
+    }
 }
 
 #[derive(Copy, Clone, Debug, Default, Eq, PartialEq)]
@@ -318,6 +339,11 @@ impl Decoder for U16Codec {
     #[cfg_attr(feature = "tracing", tracing::instrument(level = "trace", ret))]
     fn decode(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
         Leb128DecoderU16.decode(src)
+    }
+
+    #[cfg_attr(feature = "tracing", tracing::instrument(level = "trace", ret))]
+    fn decode_eof(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
+        Leb128DecoderU16.decode_eof(src)
     }
 }
 
@@ -343,6 +369,11 @@ impl Decoder for S32Codec {
     fn decode(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
         Leb128DecoderI32.decode(src)
     }
+
+    #[cfg_attr(feature = "tracing", tracing::instrument(level = "trace", ret))]
+    fn decode_eof(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
+        Leb128DecoderI32.decode_eof(src)
+    }
 }
 
 #[derive(Copy, Clone, Debug, Default, Eq, PartialEq)]
@@ -366,6 +397,11 @@ impl Decoder for U32Codec {
     #[cfg_attr(feature = "tracing", tracing::instrument(level = "trace", ret))]
     fn decode(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
         Leb128DecoderU32.decode(src)
+    }
+
+    #[cfg_attr(feature = "tracing", tracing::instrument(level = "trace", ret))]
+    fn decode_eof(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
+        Leb128DecoderU32.decode_eof(src)
     }
 }
 
@@ -391,6 +427,11 @@ impl Decoder for S64Codec {
     fn decode(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
         Leb128DecoderI64.decode(src)
     }
+
+    #[cfg_attr(feature = "tracing", tracing::instrument(level = "trace", ret))]
+    fn decode_eof(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
+        Leb128DecoderI64.decode_eof(src)
+    }
 }
 
 #[derive(Copy, Clone, Debug, Default, Eq, PartialEq)]
@@ -414,6 +455,11 @@ impl Decoder for U64Codec {
     #[cfg_attr(feature = "tracing", tracing::instrument(level = "trace", ret))]
     fn decode(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
         Leb128DecoderU64.decode(src)
+    }
+
+    #[cfg_attr(feature = "tracing", tracing::instrument(level = "trace", ret))]
+    fn decode_eof(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
+        Leb128DecoderU64.decode_eof(src)
     }
 }
 
@@ -442,6 +488,11 @@ impl Decoder for F32Codec {
         ensure_capacity!(src, 4_usize);
         Ok(Some(src.get_f32_le()))
     }
+
+    #[cfg_attr(feature = "tracing", tracing::instrument(level = "trace", ret))]
+    fn decode_eof(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
+        stateless_decode_eof(self, src)
+    }
 }
 
 #[derive(Copy, Clone, Debug, Default, Eq, PartialEq)]
@@ -468,6 +519,11 @@ impl Decoder for F64Codec {
     fn decode(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
         ensure_capacity!(src, 8_usize);
         Ok(Some(src.get_f64_le()))
+    }
+
+    #[cfg_attr(feature = "tracing", tracing::instrument(level = "trace", ret))]
+    fn decode_eof(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
+        stateless_decode_eof(self, src)
     }
 }
 
@@ -748,7 +804,7 @@ impl<const N: usize> Decoder for FlagDecoder<N> {
 
     #[cfg_attr(
         feature = "tracing",
-        tracing::instrument(level = "trace", skip_all, fields(dst, ty = "flags"))
+        tracing::instrument(level = "trace", skip_all, fields(ty = "flags"))
     )]
     fn decode(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
         let n = N.div_ceil(8);
@@ -756,6 +812,14 @@ impl<const N: usize> Decoder for FlagDecoder<N> {
             ensure_capacity!(src, n);
         }
         Ok(Some(src.split_to(n).freeze()))
+    }
+
+    #[cfg_attr(
+        feature = "tracing",
+        tracing::instrument(level = "trace", skip_all, fields(ty = "flags"))
+    )]
+    fn decode_eof(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
+        stateless_decode_eof(self, src)
     }
 }
 
@@ -788,6 +852,7 @@ pub struct TupleEncoder<T>(pub T);
 pub struct TupleDecoder<C, V> {
     dec: C,
     v: V,
+    started: bool,
 }
 
 impl<C, V> TupleDecoder<C, V> {
@@ -804,6 +869,7 @@ where
         Self {
             dec: decoder,
             v: V::default(),
+            started: false,
         }
     }
 }
@@ -877,6 +943,7 @@ macro_rules! impl_tuple_codec {
                 Self{
                     dec: ($($ct::default()),+,),
                     v: ($(Option::<$ct::Item>::None),+,),
+                    started: false,
                 }
             }
         }
@@ -884,7 +951,7 @@ macro_rules! impl_tuple_codec {
         impl<E, $($ct),+> Decoder for TupleDecoder<($($ct),+,), ($(Option<$ct::Item>),+,)>
         where
             E: From<std::io::Error>,
-            $($ct: Decoder<Error = E>),+,
+            $($ct: Decoder<Error = E> + Default),+,
         {
             type Error = E;
             type Item = ($($ct::Item),+,);
@@ -897,17 +964,84 @@ macro_rules! impl_tuple_codec {
                 &mut self,
                 src: &mut BytesMut,
             ) -> Result<Option<Self::Item>, Self::Error> {
+                    self.decode_fields(src, false)
+            }
+
+            #[cfg_attr(
+                feature = "tracing",
+                tracing::instrument(level = "trace", skip(self), fields(ty = "tuple"))
+            )]
+            fn decode_eof(
+                &mut self,
+                src: &mut BytesMut,
+            ) -> Result<Option<Self::Item>, Self::Error> {
+                    self.decode_fields(src, true)
+            }
+        }
+
+        impl<E, $($ct),+> TupleDecoder<($($ct),+,), ($(Option<$ct::Item>),+,)>
+        where
+            E: From<std::io::Error>,
+            $($ct: Decoder<Error = E> + Default),+,
+        {
+            fn reset(&mut self) {
+                self.dec = ($($ct::default()),+,);
+                self.v = ($(Option::<$ct::Item>::None),+,);
+                self.started = false;
+            }
+
+            fn decode_fields(
+                &mut self,
+                src: &mut BytesMut,
+                eof: bool,
+            ) -> Result<Option<($($ct::Item),+,)>, E> {
                     let ($(ref mut $vn),+,) = self.v;
                     let ($(ref mut $cn),+,) = self.dec;
-                    $(
-                        if $vn.is_none() {
-                            let Some(v) = $cn.decode(src)? else  {
-                                return Ok(None)
-                            };
-                            *$vn = Some(v);
+                    let n = src.len();
+                    let res: Result<Option<()>, E> = 'decode: {
+                        $(
+                            if $vn.is_none() {
+                                let v = if eof { $cn.decode_eof(src) } else { $cn.decode(src) };
+                                match v {
+                                    Ok(Some(v)) => *$vn = Some(v),
+                                    Ok(None) => break 'decode Ok(None),
+                                    Err(err) => break 'decode Err(err),
+                                }
+                            }
+                        )+
+                        Ok(Some(()))
+                    };
+                    if src.len() < n {
+                        self.started = true;
+                    }
+                    match res {
+                        Ok(Some(())) if self.started => {
+                            self.started = false;
+                            Ok(Some(($($vn.take().unwrap()),+,)))
                         }
-                    )+
-                    Ok(Some(($($vn.take().unwrap()),+,)))
+                        Ok(Some(())) => {
+                            self.reset();
+                            Err(std::io::Error::new(
+                                std::io::ErrorKind::InvalidData,
+                                "tuple decoded from zero bytes",
+                            )
+                            .into())
+                        }
+                        Ok(None) if !eof => Ok(None),
+                        Ok(None) => {
+                            let started = self.started;
+                            self.reset();
+                            if started || !src.is_empty() {
+                                Err(std::io::Error::from(std::io::ErrorKind::UnexpectedEof).into())
+                            } else {
+                                Ok(None)
+                            }
+                        }
+                        Err(err) => {
+                            self.reset();
+                            Err(err)
+                        }
+                    }
             }
         }
     };
@@ -1093,18 +1227,20 @@ impl<T> OptionDecoder<T> {
     }
 }
 
-impl<T> Decoder for OptionDecoder<T>
+impl<T> OptionDecoder<T>
 where
-    T: Decoder,
+    T: Decoder + Default,
 {
-    type Item = Option<T::Item>;
-    type Error = T::Error;
+    fn reset(&mut self) {
+        self.dec = T::default();
+        self.is_some = false;
+    }
 
-    #[cfg_attr(
-        feature = "tracing",
-        tracing::instrument(level = "trace", skip(self), fields(ty = "option"))
-    )]
-    fn decode(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
+    fn decode_value(
+        &mut self,
+        src: &mut BytesMut,
+        eof: bool,
+    ) -> Result<Option<Option<T::Item>>, T::Error> {
         if !self.is_some {
             ensure_capacity!(src, 1_usize);
             match src.get_u8() {
@@ -1121,11 +1257,53 @@ where
                 }
             }
         }
-        let Some(v) = self.dec.decode(src)? else {
-            return Ok(None);
+        let res = if eof {
+            self.dec.decode_eof(src)
+        } else {
+            self.dec.decode(src)
         };
-        self.is_some = false;
-        Ok(Some(Some(v)))
+        match res {
+            Ok(Some(v)) => {
+                self.is_some = false;
+                Ok(Some(Some(v)))
+            }
+            Ok(None) => Ok(None),
+            Err(err) => {
+                self.reset();
+                Err(err)
+            }
+        }
+    }
+}
+
+impl<T> Decoder for OptionDecoder<T>
+where
+    T: Decoder + Default,
+{
+    type Item = Option<T::Item>;
+    type Error = T::Error;
+
+    #[cfg_attr(
+        feature = "tracing",
+        tracing::instrument(level = "trace", skip(self), fields(ty = "option"))
+    )]
+    fn decode(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
+        self.decode_value(src, false)
+    }
+
+    #[cfg_attr(
+        feature = "tracing",
+        tracing::instrument(level = "trace", skip(self), fields(ty = "option"))
+    )]
+    fn decode_eof(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
+        match self.decode_value(src, true)? {
+            Some(frame) => Ok(Some(frame)),
+            None if !self.is_some => Ok(None),
+            None => {
+                self.reset();
+                Err(std::io::Error::from(std::io::ErrorKind::UnexpectedEof).into())
+            }
+        }
     }
 }
 
@@ -1224,21 +1402,24 @@ impl<O, E> ResultDecoder<O, E> {
     }
 }
 
-impl<O, E> Decoder for ResultDecoder<O, E>
+impl<O, E> ResultDecoder<O, E>
 where
-    O: Decoder,
-    E: Decoder,
+    O: Decoder + Default,
+    E: Decoder + Default,
     std::io::Error: From<O::Error>,
     std::io::Error: From<E::Error>,
 {
-    type Item = Result<O::Item, E::Item>;
-    type Error = std::io::Error;
+    fn reset(&mut self) {
+        self.ok = O::default();
+        self.err = E::default();
+        self.is_ok = None;
+    }
 
-    #[cfg_attr(
-        feature = "tracing",
-        tracing::instrument(level = "trace", skip(self), fields(ty = "result"))
-    )]
-    fn decode(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
+    fn decode_value(
+        &mut self,
+        src: &mut BytesMut,
+        eof: bool,
+    ) -> std::io::Result<Option<Result<O::Item, E::Item>>> {
         let is_ok = if let Some(is_ok) = self.is_ok {
             is_ok
         } else {
@@ -1261,24 +1442,66 @@ where
             }
         };
         let res = if is_ok {
-            let Some(v) = self.ok.decode(src)? else {
-                return Ok(None);
+            let v = if eof {
+                self.ok.decode_eof(src)
+            } else {
+                self.ok.decode(src)
             };
-            Ok(v)
+            v.map(|v| v.map(Ok)).map_err(Into::into)
         } else {
-            let Some(v) = self.err.decode(src)? else {
-                return Ok(None);
+            let v = if eof {
+                self.err.decode_eof(src)
+            } else {
+                self.err.decode(src)
             };
-            Err(v)
+            v.map(|v| v.map(Err)).map_err(Into::into)
         };
-        self.is_ok = None;
-        Ok(Some(res))
+        match res {
+            Ok(Some(_)) => self.is_ok = None,
+            Ok(None) => {}
+            Err(_) => self.reset(),
+        }
+        res
+    }
+}
+
+impl<O, E> Decoder for ResultDecoder<O, E>
+where
+    O: Decoder + Default,
+    E: Decoder + Default,
+    std::io::Error: From<O::Error>,
+    std::io::Error: From<E::Error>,
+{
+    type Item = Result<O::Item, E::Item>;
+    type Error = std::io::Error;
+
+    #[cfg_attr(
+        feature = "tracing",
+        tracing::instrument(level = "trace", skip(self), fields(ty = "result"))
+    )]
+    fn decode(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
+        self.decode_value(src, false)
+    }
+
+    #[cfg_attr(
+        feature = "tracing",
+        tracing::instrument(level = "trace", skip(self), fields(ty = "result"))
+    )]
+    fn decode_eof(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
+        match self.decode_value(src, true)? {
+            Some(frame) => Ok(Some(frame)),
+            None if self.is_ok.is_none() => Ok(None),
+            None => {
+                self.reset();
+                Err(std::io::ErrorKind::UnexpectedEof.into())
+            }
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::CoreNameDecoder;
+    use crate::{CoreNameDecoder, CoreVecDecoder};
 
     use super::*;
 
@@ -1325,5 +1548,275 @@ mod tests {
         assert_eq!(c, "test");
         assert_eq!(d, 0x42);
         assert_eq!(e, Ok(true));
+    }
+
+    #[test_log::test]
+    fn option_reset_on_error() {
+        let mut dec = OptionDecoder::<CoreNameDecoder>::default();
+        let mut src = BytesMut::from(b"\x01\x01\xff".as_slice());
+        dec.decode(&mut src).expect_err("invalid UTF-8 must fail");
+        let mut src = BytesMut::from(b"\x01\x01b".as_slice());
+        assert_eq!(
+            dec.decode(&mut src).unwrap().unwrap(),
+            Some("b".to_string())
+        );
+    }
+
+    #[test_log::test]
+    fn result_reset_on_error() {
+        let mut dec = ResultDecoder::<CoreNameDecoder, BoolCodec>::default();
+        let mut src = BytesMut::from(b"\x00\x01\xff".as_slice());
+        dec.decode(&mut src).expect_err("invalid UTF-8 must fail");
+        let mut src = BytesMut::from(b"\x01\x01".as_slice());
+        assert_eq!(dec.decode(&mut src).unwrap().unwrap(), Err(true));
+    }
+
+    #[test_log::test]
+    fn tuple_reset_on_error() {
+        let mut dec =
+            TupleDecoder::<(BoolCodec, CoreNameDecoder), (Option<bool>, Option<String>)>::default();
+        let mut src = BytesMut::from(b"\x01\x01\xff".as_slice());
+        dec.decode(&mut src).expect_err("invalid UTF-8 must fail");
+        let mut src = BytesMut::from(b"\x00\x01b".as_slice());
+        assert_eq!(
+            dec.decode(&mut src).unwrap().unwrap(),
+            (false, "b".to_string())
+        );
+    }
+
+    #[test_log::test]
+    fn option_reset_on_eof() {
+        let mut dec = OptionDecoder::<CoreNameDecoder>::default();
+        let mut src = BytesMut::from(b"\x01\x02a".as_slice());
+        let err = dec
+            .decode_eof(&mut src)
+            .expect_err("truncated option must fail");
+        assert_eq!(err.kind(), std::io::ErrorKind::UnexpectedEof);
+        let mut src = BytesMut::from(b"\x01\x01b".as_slice());
+        assert_eq!(
+            dec.decode(&mut src).unwrap().unwrap(),
+            Some("b".to_string())
+        );
+        assert!(dec.decode_eof(&mut BytesMut::new()).unwrap().is_none());
+    }
+
+    #[test_log::test]
+    fn result_reset_on_eof() {
+        let mut dec = ResultDecoder::<CoreNameDecoder, BoolCodec>::default();
+        let mut src = BytesMut::from(b"\x00".as_slice());
+        let err = dec
+            .decode_eof(&mut src)
+            .expect_err("truncated result must fail");
+        assert_eq!(err.kind(), std::io::ErrorKind::UnexpectedEof);
+        let mut src = BytesMut::from(b"\x01\x01".as_slice());
+        assert_eq!(dec.decode(&mut src).unwrap().unwrap(), Err(true));
+    }
+
+    #[test_log::test]
+    fn tuple_reset_on_eof() {
+        let mut dec = TupleDecoder::<
+            (BoolCodec, OptionDecoder<CoreNameDecoder>),
+            (Option<bool>, Option<Option<String>>),
+        >::default();
+        let mut src = BytesMut::from(b"\x01\x01".as_slice());
+        let err = dec
+            .decode_eof(&mut src)
+            .expect_err("truncated tuple must fail");
+        assert_eq!(err.kind(), std::io::ErrorKind::UnexpectedEof);
+        let mut src = BytesMut::from(b"\x00\x01\x01b".as_slice());
+        assert_eq!(
+            dec.decode(&mut src).unwrap().unwrap(),
+            (false, Some("b".to_string()))
+        );
+    }
+
+    #[derive(Default)]
+    struct EofDecoder;
+
+    impl Decoder for EofDecoder {
+        type Item = Bytes;
+        type Error = std::io::Error;
+
+        fn decode(&mut self, _: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
+            Ok(None)
+        }
+
+        fn decode_eof(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
+            if src.is_empty() {
+                Ok(None)
+            } else {
+                Ok(Some(src.split().freeze()))
+            }
+        }
+    }
+
+    #[test_log::test]
+    fn tuple_inner_eof_value() {
+        let mut dec =
+            TupleDecoder::<(BoolCodec, EofDecoder), (Option<bool>, Option<Bytes>)>::default();
+        let mut src = BytesMut::from(b"\x01abc".as_slice());
+        assert_eq!(
+            dec.decode_eof(&mut src).unwrap().unwrap(),
+            (true, Bytes::from_static(b"abc"))
+        );
+
+        let mut dec =
+            TupleDecoder::<(EofDecoder, BoolCodec), (Option<Bytes>, Option<bool>)>::default();
+        let mut src = BytesMut::from(b"abc".as_slice());
+        let err = dec
+            .decode_eof(&mut src)
+            .expect_err("truncated tuple must fail");
+        assert_eq!(err.kind(), std::io::ErrorKind::UnexpectedEof);
+    }
+
+    #[derive(Default)]
+    struct NoneDecoder;
+
+    impl Decoder for NoneDecoder {
+        type Item = ();
+        type Error = std::io::Error;
+
+        fn decode(&mut self, _: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
+            Ok(None)
+        }
+
+        fn decode_eof(&mut self, _: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
+            Ok(None)
+        }
+    }
+
+    #[test_log::test]
+    fn tuple_trailing_eof() {
+        let mut dec =
+            TupleDecoder::<(NoneDecoder, BoolCodec), (Option<()>, Option<bool>)>::default();
+        let mut src = BytesMut::from(b"\x01".as_slice());
+        let err = dec
+            .decode_eof(&mut src)
+            .expect_err("trailing bytes must fail");
+        assert_eq!(err.kind(), std::io::ErrorKind::UnexpectedEof);
+    }
+
+    #[test_log::test]
+    fn tuple_zero_size_eof() {
+        let mut dec =
+            TupleDecoder::<(FlagDecoder<0>, BoolCodec), (Option<Bytes>, Option<bool>)>::default();
+        let mut src = BytesMut::default();
+        assert_eq!(dec.decode_eof(&mut src).unwrap(), None);
+        let mut src = BytesMut::from(b"\x01".as_slice());
+        assert_eq!(
+            dec.decode(&mut src).unwrap().unwrap(),
+            (Bytes::default(), true)
+        );
+    }
+
+    #[test_log::test]
+    fn tuple_zero_size() {
+        let mut dec = TupleDecoder::<(FlagDecoder<0>,), (Option<Bytes>,)>::default();
+        let err = dec
+            .decode(&mut BytesMut::new())
+            .expect_err("zero-size tuple must fail");
+        assert_eq!(err.kind(), std::io::ErrorKind::InvalidData);
+        let err = dec
+            .decode_eof(&mut BytesMut::new())
+            .expect_err("zero-size tuple must fail");
+        assert_eq!(err.kind(), std::io::ErrorKind::InvalidData);
+    }
+
+    #[derive(Default)]
+    struct PairDecoder(Option<u8>);
+
+    impl Decoder for PairDecoder {
+        type Item = [u8; 2];
+        type Error = std::io::Error;
+
+        fn decode(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
+            while !src.is_empty() {
+                let b = src.get_u8();
+                if let Some(a) = self.0.take() {
+                    return Ok(Some([a, b]));
+                }
+                self.0 = Some(b);
+            }
+            Ok(None)
+        }
+    }
+
+    #[test_log::test]
+    fn inner_reset_on_eof() {
+        let mut dec = OptionDecoder::<PairDecoder>::default();
+        let err = dec
+            .decode_eof(&mut BytesMut::from(b"\x01a".as_slice()))
+            .expect_err("truncated option must fail");
+        assert_eq!(err.kind(), std::io::ErrorKind::UnexpectedEof);
+        let mut src = BytesMut::from(b"\x01bc".as_slice());
+        assert_eq!(dec.decode(&mut src).unwrap().unwrap(), Some(*b"bc"));
+
+        let mut dec = ResultDecoder::<PairDecoder, BoolCodec>::default();
+        let err = dec
+            .decode_eof(&mut BytesMut::from(b"\x00a".as_slice()))
+            .expect_err("truncated result must fail");
+        assert_eq!(err.kind(), std::io::ErrorKind::UnexpectedEof);
+        let mut src = BytesMut::from(b"\x00bc".as_slice());
+        assert_eq!(dec.decode(&mut src).unwrap().unwrap(), Ok(*b"bc"));
+
+        let mut dec = TupleDecoder::<(PairDecoder,), (Option<[u8; 2]>,)>::default();
+        let err = dec
+            .decode_eof(&mut BytesMut::from(b"a".as_slice()))
+            .expect_err("truncated tuple must fail");
+        assert_eq!(err.kind(), std::io::ErrorKind::UnexpectedEof);
+        let mut src = BytesMut::from(b"bc".as_slice());
+        assert_eq!(dec.decode(&mut src).unwrap().unwrap(), (*b"bc",));
+
+        let mut dec = CoreVecDecoder::<PairDecoder>::default();
+        let err = dec
+            .decode_eof(&mut BytesMut::from(b"\x01a".as_slice()))
+            .expect_err("truncated vec must fail");
+        assert_eq!(err.kind(), std::io::ErrorKind::UnexpectedEof);
+        let mut src = BytesMut::from(b"\x01bc".as_slice());
+        assert_eq!(dec.decode(&mut src).unwrap().unwrap(), [*b"bc"]);
+    }
+
+    #[test_log::test]
+    fn option_inner_eof_value() {
+        let mut dec = OptionDecoder::<EofDecoder>::default();
+        let mut src = BytesMut::from(b"\x01abc".as_slice());
+        assert_eq!(
+            dec.decode_eof(&mut src).unwrap().unwrap(),
+            Some(Bytes::from_static(b"abc"))
+        );
+    }
+
+    #[test_log::test]
+    fn result_inner_eof_value() {
+        let mut dec = ResultDecoder::<EofDecoder, BoolCodec>::default();
+        let mut src = BytesMut::from(b"\x00abc".as_slice());
+        assert_eq!(
+            dec.decode_eof(&mut src).unwrap().unwrap(),
+            Ok(Bytes::from_static(b"abc"))
+        );
+    }
+
+    #[test_log::test]
+    fn primitive_truncated_eof() {
+        let mut src = BytesMut::from(b"\x80".as_slice());
+        let err = U32Codec
+            .decode_eof(&mut src)
+            .expect_err("truncated u32 must fail");
+        assert_eq!(err.kind(), std::io::ErrorKind::UnexpectedEof);
+
+        let mut src = BytesMut::from(b"\x00\x00".as_slice());
+        let err = F32Codec
+            .decode_eof(&mut src)
+            .expect_err("truncated f32 must fail");
+        assert_eq!(err.kind(), std::io::ErrorKind::UnexpectedEof);
+
+        let mut dec = TupleDecoder::<(BoolCodec, U32Codec), (Option<bool>, Option<u32>)>::default();
+        let mut src = BytesMut::from(b"\x01\x80".as_slice());
+        let err = dec
+            .decode_eof(&mut src)
+            .expect_err("truncated tuple must fail");
+        assert_eq!(err.kind(), std::io::ErrorKind::UnexpectedEof);
+
+        assert!(U32Codec.decode_eof(&mut BytesMut::new()).unwrap().is_none());
     }
 }

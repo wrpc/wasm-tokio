@@ -805,6 +805,23 @@ pub trait AsyncWriteLeb128: AsyncWrite {
 
 impl<T: AsyncWrite> AsyncWriteLeb128 for T {}
 
+fn stateless_decode_eof<D>(dec: &mut D, buf: &mut BytesMut) -> Result<Option<D::Item>, D::Error>
+where
+    D: Decoder,
+{
+    match dec.decode(buf)? {
+        Some(frame) => Ok(Some(frame)),
+        None => {
+            if buf.is_empty() {
+                Ok(None)
+            } else {
+                Err(std::io::Error::from(std::io::ErrorKind::UnexpectedEof).into())
+            }
+        }
+    }
+}
+
+#[derive(Copy, Clone, Debug, Default, Eq, PartialEq)]
 pub struct Leb128DecoderU8;
 
 impl Decoder for Leb128DecoderU8 {
@@ -831,8 +848,13 @@ impl Decoder for Leb128DecoderU8 {
         }
         Err(invalid_data(Overflow::<8>))
     }
+
+    fn decode_eof(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
+        stateless_decode_eof(self, src)
+    }
 }
 
+#[derive(Copy, Clone, Debug, Default, Eq, PartialEq)]
 pub struct Leb128DecoderU16;
 
 impl Decoder for Leb128DecoderU16 {
@@ -859,8 +881,13 @@ impl Decoder for Leb128DecoderU16 {
         }
         Err(invalid_data(Overflow::<16>))
     }
+
+    fn decode_eof(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
+        stateless_decode_eof(self, src)
+    }
 }
 
+#[derive(Copy, Clone, Debug, Default, Eq, PartialEq)]
 pub struct Leb128DecoderU32;
 
 impl Decoder for Leb128DecoderU32 {
@@ -887,8 +914,13 @@ impl Decoder for Leb128DecoderU32 {
         }
         Err(invalid_data(Overflow::<32>))
     }
+
+    fn decode_eof(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
+        stateless_decode_eof(self, src)
+    }
 }
 
+#[derive(Copy, Clone, Debug, Default, Eq, PartialEq)]
 pub struct Leb128DecoderU64;
 
 impl Decoder for Leb128DecoderU64 {
@@ -915,8 +947,13 @@ impl Decoder for Leb128DecoderU64 {
         }
         Err(invalid_data(Overflow::<64>))
     }
+
+    fn decode_eof(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
+        stateless_decode_eof(self, src)
+    }
 }
 
+#[derive(Copy, Clone, Debug, Default, Eq, PartialEq)]
 pub struct Leb128DecoderU128;
 
 impl Decoder for Leb128DecoderU128 {
@@ -943,8 +980,13 @@ impl Decoder for Leb128DecoderU128 {
         }
         Err(invalid_data(Overflow::<128>))
     }
+
+    fn decode_eof(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
+        stateless_decode_eof(self, src)
+    }
 }
 
+#[derive(Copy, Clone, Debug, Default, Eq, PartialEq)]
 pub struct Leb128DecoderI8;
 
 impl Decoder for Leb128DecoderI8 {
@@ -975,8 +1017,13 @@ impl Decoder for Leb128DecoderI8 {
         }
         Err(invalid_data(Overflow::<8>))
     }
+
+    fn decode_eof(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
+        stateless_decode_eof(self, src)
+    }
 }
 
+#[derive(Copy, Clone, Debug, Default, Eq, PartialEq)]
 pub struct Leb128DecoderI16;
 
 impl Decoder for Leb128DecoderI16 {
@@ -1007,8 +1054,13 @@ impl Decoder for Leb128DecoderI16 {
         }
         Err(invalid_data(Overflow::<16>))
     }
+
+    fn decode_eof(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
+        stateless_decode_eof(self, src)
+    }
 }
 
+#[derive(Copy, Clone, Debug, Default, Eq, PartialEq)]
 pub struct Leb128DecoderI32;
 
 impl Decoder for Leb128DecoderI32 {
@@ -1039,8 +1091,13 @@ impl Decoder for Leb128DecoderI32 {
         }
         Err(invalid_data(Overflow::<32>))
     }
+
+    fn decode_eof(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
+        stateless_decode_eof(self, src)
+    }
 }
 
+#[derive(Copy, Clone, Debug, Default, Eq, PartialEq)]
 pub struct Leb128DecoderI64;
 
 impl Decoder for Leb128DecoderI64 {
@@ -1071,8 +1128,13 @@ impl Decoder for Leb128DecoderI64 {
         }
         Err(invalid_data(Overflow::<64>))
     }
+
+    fn decode_eof(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
+        stateless_decode_eof(self, src)
+    }
 }
 
+#[derive(Copy, Clone, Debug, Default, Eq, PartialEq)]
 pub struct Leb128DecoderI128;
 
 impl Decoder for Leb128DecoderI128 {
@@ -1102,6 +1164,10 @@ impl Decoder for Leb128DecoderI128 {
             }
         }
         Err(invalid_data(Overflow::<128>))
+    }
+
+    fn decode_eof(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
+        stateless_decode_eof(self, src)
     }
 }
 
@@ -1540,5 +1606,25 @@ mod tests {
             .await
             .expect("failed to read u64");
         assert_eq!(v, 0b1000_0000_0000_0000_0000_0000_0000_0000_0000);
+    }
+
+    #[test]
+    fn truncated_eof() {
+        let mut src = BytesMut::from(b"\xe5\x8e".as_slice());
+        let err = Leb128DecoderU32
+            .decode_eof(&mut src)
+            .expect_err("truncated u32 must fail");
+        assert_eq!(err.kind(), std::io::ErrorKind::UnexpectedEof);
+
+        let mut src = BytesMut::from(b"\x80".as_slice());
+        let err = Leb128DecoderI64
+            .decode_eof(&mut src)
+            .expect_err("truncated i64 must fail");
+        assert_eq!(err.kind(), std::io::ErrorKind::UnexpectedEof);
+
+        assert!(Leb128DecoderU32
+            .decode_eof(&mut BytesMut::new())
+            .unwrap()
+            .is_none());
     }
 }
