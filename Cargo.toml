@@ -8,6 +8,7 @@ categories.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
+rust-version.workspace = true
 
 [workspace]
 members = ["leb128-tokio", "utf8-tokio"]
@@ -18,6 +19,7 @@ categories = ["wasm"]
 edition = "2021"
 license = "Apache-2.0 WITH LLVM-exception"
 repository = "https://github.com/wrpc/wasm-tokio"
+rust-version = "1.87"
 
 [features]
 default = ["tracing"]

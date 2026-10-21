@@ -11,45 +11,13 @@ use tokio_util::codec::{Decoder, Encoder};
 #[derive(Debug)]
 pub struct Overflow<const N: usize>;
 
-impl Display for Overflow<8> {
+impl<const N: usize> Display for Overflow<N> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "varint overflows an 8-bit integer")
+        write!(f, "varint overflows {N}-bit integer")
     }
 }
 
-impl std::error::Error for Overflow<8> {}
-
-impl Display for Overflow<16> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "varint overflows a 16-bit integer")
-    }
-}
-
-impl std::error::Error for Overflow<16> {}
-
-impl Display for Overflow<32> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "varint overflows a 32-bit integer")
-    }
-}
-
-impl std::error::Error for Overflow<32> {}
-
-impl Display for Overflow<64> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "varint overflows a 64-bit integer")
-    }
-}
-
-impl std::error::Error for Overflow<64> {}
-
-impl Display for Overflow<128> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "varint overflows a 128-bit integer")
-    }
-}
-
-impl std::error::Error for Overflow<128> {}
+impl<const N: usize> std::error::Error for Overflow<N> {}
 
 /// Error returned for overflows decoding variable size integers
 #[derive(Debug)]
@@ -57,7 +25,7 @@ pub struct OverflowVar(u8);
 
 impl Display for OverflowVar {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "varint overflows a {}-bit integer", self.0)
+        write!(f, "varint overflows {}-bit integer", self.0)
     }
 }
 
@@ -67,740 +35,183 @@ fn invalid_data(err: impl Sync + Send + std::error::Error + 'static) -> std::io:
     std::io::Error::new(std::io::ErrorKind::InvalidData, err)
 }
 
-fn is_sign_extended(b: u8, bits: u8) -> bool {
+fn is_sign_extended(b: u8, bits: u32) -> bool {
     let shift = bits.saturating_sub(1);
     let rest = (b & 0x7f) >> shift;
     rest == 0 || rest == 0x7f >> shift
 }
 
+macro_rules! decode_unsigned_leb128 {
+    ($t:ident, $i:ident => $next:expr, $x:ident => $ret:expr) => {
+        decode_unsigned_leb128!(
+            $t,
+            <$t>::BITS,
+            Overflow::<{ <$t>::BITS as usize }>,
+            $i => $next,
+            $x => $ret
+        )
+    };
+    ($t:ident, $bits:expr, $err:expr, $i:ident => $next:expr, $x:ident => $ret:expr) => {{
+        let bits: u32 = $bits;
+        let last = bits.saturating_sub(1) / 7 * 7;
+        let max: u8 = (1 << bits.saturating_sub(last)) - 1;
+        let mut $x: $t = 0;
+        for ($i, s) in (0..=last).step_by(7).enumerate() {
+            let b: u8 = $next;
+            if s == last && b > max {
+                break;
+            }
+            $x |= (<$t>::from(b) & 0x7f) << s;
+            if b & 0x80 == 0 {
+                return $ret;
+            }
+        }
+        Err(invalid_data($err))
+    }};
+}
+
+macro_rules! decode_signed_leb128 {
+    ($t:ident, $i:ident => $next:expr, $x:ident => $ret:expr) => {{
+        const LAST: u32 = (<$t>::BITS - 1) / 7 * 7;
+        let mut $x: $t = 0;
+        for ($i, s) in (0..=LAST).step_by(7).enumerate() {
+            let b: u8 = $next;
+            if s == LAST && !is_sign_extended(b, <$t>::BITS - LAST) {
+                break;
+            }
+            $x |= <$t>::from((b & 0x7f).cast_signed()) << s;
+            if b & 0x80 == 0 {
+                if s != LAST && b & 0x40 != 0 {
+                    $x |= !0 << (s + 7);
+                }
+                return $ret;
+            }
+        }
+        Err(invalid_data(Overflow::<{ <$t>::BITS as usize }>))
+    }};
+}
+
+macro_rules! read_leb128 {
+    ($f:ident, $t:ident, $decode:ident) => {
+        #[cfg_attr(
+            feature = "tracing",
+            tracing::instrument(level = "trace", ret, skip_all, fields(ty = stringify!($t)))
+        )]
+        fn $f(&mut self) -> impl Future<Output = std::io::Result<$t>>
+        where
+            Self: Unpin,
+        {
+            async move { $decode!($t, _i => self.read_u8().await?, x => Ok(x)) }
+        }
+    };
+}
+
+macro_rules! read_var_unsigned_leb128 {
+    ($f:ident, $t:ident, $bits:literal, $fixed:ident, [$($sbits:literal => $sfixed:ident),*]) => {
+        #[cfg_attr(
+            feature = "tracing",
+            tracing::instrument(level = "trace", ret, skip_all, fields(ty = "uvarint", n = n))
+        )]
+        fn $f(&mut self, n: u8) -> impl Future<Output = std::io::Result<$t>>
+        where
+            Self: Unpin,
+        {
+            async move {
+                match n {
+                    $($sbits => return self.$sfixed().await.map(Into::into),)*
+                    $bits => return self.$fixed().await,
+                    n if n > $bits => {
+                        return Err(std::io::Error::new(
+                            std::io::ErrorKind::InvalidInput,
+                            format!("{n}-bit integer does not fit in `{}`", stringify!($t)),
+                        ))
+                    }
+                    _ => {}
+                }
+                decode_unsigned_leb128!(
+                    $t,
+                    u32::from(n),
+                    OverflowVar(n),
+                    _i => self.read_u8().await?,
+                    x => Ok(x)
+                )
+            }
+        }
+    };
+}
+
 pub trait AsyncReadLeb128: AsyncRead {
-    #[cfg_attr(
-        feature = "tracing",
-        tracing::instrument(level = "trace", ret, skip_all, fields(ty = "u8"))
-    )]
-    fn read_u8_leb128(&mut self) -> impl Future<Output = std::io::Result<u8>>
-    where
-        Self: Unpin,
-    {
-        async move {
-            let mut x = 0;
-            let mut s = 0u8;
-            for _ in 0..2 {
-                let b = self.read_u8().await?;
-                if s == 7 && b > 0x01 {
-                    return Err(invalid_data(Overflow::<8>));
-                }
-                x |= (b & 0x7f) << s;
-                if b & 0x80 == 0 {
-                    return Ok(x);
-                }
-                s += 7;
-            }
-            Err(invalid_data(Overflow::<8>))
-        }
-    }
+    read_leb128!(read_u8_leb128, u8, decode_unsigned_leb128);
+    read_leb128!(read_u16_leb128, u16, decode_unsigned_leb128);
+    read_leb128!(read_u32_leb128, u32, decode_unsigned_leb128);
+    read_leb128!(read_u64_leb128, u64, decode_unsigned_leb128);
+    read_leb128!(read_u128_leb128, u128, decode_unsigned_leb128);
 
-    #[cfg_attr(
-        feature = "tracing",
-        tracing::instrument(level = "trace", ret, skip_all, fields(ty = "u16"))
-    )]
-    fn read_u16_leb128(&mut self) -> impl Future<Output = std::io::Result<u16>>
-    where
-        Self: Unpin,
-    {
-        async move {
-            let mut x = 0;
-            let mut s = 0u8;
-            for _ in 0..3 {
-                let b = self.read_u8().await?;
-                if s == 14 && b > 0x03 {
-                    return Err(invalid_data(Overflow::<16>));
-                }
-                x |= (u16::from(b) & 0x7f) << s;
-                if b & 0x80 == 0 {
-                    return Ok(x);
-                }
-                s += 7;
-            }
-            Err(invalid_data(Overflow::<16>))
-        }
-    }
+    read_var_unsigned_leb128!(read_var_u8_leb128, u8, 8, read_u8_leb128, []);
+    read_var_unsigned_leb128!(
+        read_var_u16_leb128,
+        u16,
+        16,
+        read_u16_leb128,
+        [8 => read_u8_leb128]
+    );
+    read_var_unsigned_leb128!(
+        read_var_u32_leb128,
+        u32,
+        32,
+        read_u32_leb128,
+        [8 => read_u8_leb128, 16 => read_u16_leb128]
+    );
+    read_var_unsigned_leb128!(
+        read_var_u64_leb128,
+        u64,
+        64,
+        read_u64_leb128,
+        [8 => read_u8_leb128, 16 => read_u16_leb128, 32 => read_u32_leb128]
+    );
+    read_var_unsigned_leb128!(
+        read_var_u128_leb128,
+        u128,
+        128,
+        read_u128_leb128,
+        [8 => read_u8_leb128, 16 => read_u16_leb128, 32 => read_u32_leb128, 64 => read_u64_leb128]
+    );
 
-    #[cfg_attr(
-        feature = "tracing",
-        tracing::instrument(level = "trace", ret, skip_all, fields(ty = "u32"))
-    )]
-    fn read_u32_leb128(&mut self) -> impl Future<Output = std::io::Result<u32>>
-    where
-        Self: Unpin,
-    {
-        async move {
-            let mut x = 0;
-            let mut s = 0u8;
-            for _ in 0..5 {
-                let b = self.read_u8().await?;
-                if s == 28 && b > 0x0f {
-                    return Err(invalid_data(Overflow::<32>));
-                }
-                x |= (u32::from(b) & 0x7f) << s;
-                if b & 0x80 == 0 {
-                    return Ok(x);
-                }
-                s += 7;
-            }
-            Err(invalid_data(Overflow::<32>))
-        }
-    }
-
-    #[cfg_attr(
-        feature = "tracing",
-        tracing::instrument(level = "trace", ret, skip_all, fields(ty = "u64"))
-    )]
-    fn read_u64_leb128(&mut self) -> impl Future<Output = std::io::Result<u64>>
-    where
-        Self: Unpin,
-    {
-        async move {
-            let mut x = 0;
-            let mut s = 0u8;
-            for _ in 0..10 {
-                let b = self.read_u8().await?;
-                if s == 63 && b > 0x01 {
-                    return Err(invalid_data(Overflow::<64>));
-                }
-                x |= (u64::from(b) & 0x7f) << s;
-                if b & 0x80 == 0 {
-                    return Ok(x);
-                }
-                s += 7;
-            }
-            Err(invalid_data(Overflow::<64>))
-        }
-    }
-
-    #[cfg_attr(
-        feature = "tracing",
-        tracing::instrument(level = "trace", ret, skip_all, fields(ty = "u128"))
-    )]
-    fn read_u128_leb128(&mut self) -> impl Future<Output = std::io::Result<u128>>
-    where
-        Self: Unpin,
-    {
-        async move {
-            let mut x = 0;
-            let mut s = 0u8;
-            for _ in 0..19 {
-                let b = self.read_u8().await?;
-                if s == 126 && b > 0x03 {
-                    return Err(invalid_data(Overflow::<128>));
-                }
-                x |= (u128::from(b) & 0x7f) << s;
-                if b & 0x80 == 0 {
-                    return Ok(x);
-                }
-                s += 7;
-            }
-            Err(invalid_data(Overflow::<128>))
-        }
-    }
-
-    #[cfg_attr(
-        feature = "tracing",
-        tracing::instrument(level = "trace", ret, skip_all, fields(ty = "uvarint", n))
-    )]
-    fn read_var_u8_leb128(&mut self, n: u8) -> impl Future<Output = std::io::Result<u8>>
-    where
-        Self: Unpin,
-    {
-        async move {
-            if n == 8 {
-                return self.read_u8_leb128().await;
-            }
-            debug_assert!(n <= 8);
-            let max = (n / 7) + 1;
-            let mut x = 0u8;
-            let mut s = 0u8;
-            for _ in 0..max {
-                let b = self.read_u8().await?;
-                if s == (n / 7) * 7 && b > n % 7 {
-                    return Err(invalid_data(OverflowVar(n)));
-                }
-                x |= (b & 0x7f) << s;
-                if b & 0x80 == 0 {
-                    return Ok(x);
-                }
-                s += 7;
-            }
-            Err(invalid_data(OverflowVar(n)))
-        }
-    }
-
-    #[cfg_attr(
-        feature = "tracing",
-        tracing::instrument(level = "trace", ret, skip_all, fields(ty = "uvarint", n))
-    )]
-    fn read_var_u16_leb128(&mut self, n: u8) -> impl Future<Output = std::io::Result<u16>>
-    where
-        Self: Unpin,
-    {
-        async move {
-            match n {
-                8 => return self.read_u8_leb128().await.map(Into::into),
-                16 => return self.read_u16_leb128().await,
-                _ => {}
-            }
-            debug_assert!(n <= 16);
-            let max = (n / 7) + 1;
-            let mut x = 0;
-            let mut s = 0u8;
-            for _ in 0..max {
-                let b = self.read_u8().await?;
-                if s == (n / 7) * 7 && b > n % 7 {
-                    return Err(invalid_data(OverflowVar(n)));
-                }
-                x |= (u16::from(b) & 0x7f) << s;
-                if b & 0x80 == 0 {
-                    return Ok(x);
-                }
-                s += 7;
-            }
-            Err(invalid_data(OverflowVar(n)))
-        }
-    }
-
-    #[cfg_attr(
-        feature = "tracing",
-        tracing::instrument(level = "trace", ret, skip_all, fields(ty = "uvarint", n))
-    )]
-    fn read_var_u32_leb128(&mut self, n: u8) -> impl Future<Output = std::io::Result<u32>>
-    where
-        Self: Unpin,
-    {
-        async move {
-            match n {
-                8 => return self.read_u8_leb128().await.map(Into::into),
-                16 => return self.read_u16_leb128().await.map(Into::into),
-                32 => return self.read_u32_leb128().await,
-                _ => {}
-            }
-            debug_assert!(n <= 32);
-            let max = (n / 7) + 1;
-            let mut x = 0;
-            let mut s = 0u8;
-            for _ in 0..max {
-                let b = self.read_u8().await?;
-                if s == (n / 7) * 7 && b > n % 7 {
-                    return Err(invalid_data(OverflowVar(n)));
-                }
-                x |= (u32::from(b) & 0x7f) << s;
-                if b & 0x80 == 0 {
-                    return Ok(x);
-                }
-                s += 7;
-            }
-            Err(invalid_data(OverflowVar(n)))
-        }
-    }
-
-    #[cfg_attr(
-        feature = "tracing",
-        tracing::instrument(level = "trace", ret, skip_all, fields(ty = "uvarint", n))
-    )]
-    fn read_var_u64_leb128(&mut self, n: u8) -> impl Future<Output = std::io::Result<u64>>
-    where
-        Self: Unpin,
-    {
-        async move {
-            match n {
-                8 => return self.read_u8_leb128().await.map(Into::into),
-                16 => return self.read_u16_leb128().await.map(Into::into),
-                32 => return self.read_u32_leb128().await.map(Into::into),
-                64 => return self.read_u64_leb128().await,
-                _ => {}
-            }
-            debug_assert!(n <= 64);
-            let max = (n / 7) + 1;
-            let mut x = 0;
-            let mut s = 0u8;
-            for _ in 0..max {
-                let b = self.read_u8().await?;
-                if s == (n / 7) * 7 && b > n % 7 {
-                    return Err(invalid_data(OverflowVar(n)));
-                }
-                x |= (u64::from(b) & 0x7f) << s;
-                if b & 0x80 == 0 {
-                    return Ok(x);
-                }
-                s += 7;
-            }
-            Err(invalid_data(OverflowVar(n)))
-        }
-    }
-
-    #[cfg_attr(
-        feature = "tracing",
-        tracing::instrument(level = "trace", ret, skip_all, fields(ty = "uvarint", n))
-    )]
-    fn read_var_u128_leb128(&mut self, n: u8) -> impl Future<Output = std::io::Result<u128>>
-    where
-        Self: Unpin,
-    {
-        async move {
-            match n {
-                8 => return self.read_u8_leb128().await.map(Into::into),
-                16 => return self.read_u16_leb128().await.map(Into::into),
-                32 => return self.read_u32_leb128().await.map(Into::into),
-                64 => return self.read_u64_leb128().await.map(Into::into),
-                128 => return self.read_u128_leb128().await,
-                _ => {}
-            }
-            debug_assert!(n <= 128);
-            let max = (n / 7) + 1;
-            let mut x = 0;
-            let mut s = 0u8;
-            for _ in 0..max {
-                let b = self.read_u8().await?;
-                if s == (n / 7) * 7 && b > n % 7 {
-                    return Err(invalid_data(OverflowVar(n)));
-                }
-                x |= (u128::from(b) & 0x7f) << s;
-                if b & 0x80 == 0 {
-                    return Ok(x);
-                }
-                s += 7;
-            }
-            Err(invalid_data(OverflowVar(n)))
-        }
-    }
-
-    #[cfg_attr(
-        feature = "tracing",
-        tracing::instrument(level = "trace", ret, skip_all, fields(ty = "i8"))
-    )]
-    fn read_i8_leb128(&mut self) -> impl Future<Output = std::io::Result<i8>>
-    where
-        Self: Unpin,
-    {
-        async move {
-            let mut x = 0;
-            let mut s = 0u8;
-            for _ in 0..2 {
-                let b = self.read_u8().await?;
-                if s == 7 && !is_sign_extended(b, 1) {
-                    return Err(invalid_data(Overflow::<8>));
-                }
-                x |= ((b as i8) & 0x7f) << s;
-                s += 7;
-                if b & 0x80 == 0 {
-                    if s != 14 && b & 0x40 != 0 {
-                        return Ok(x | !0 << s);
-                    } else {
-                        return Ok(x);
-                    }
-                }
-            }
-            Err(invalid_data(Overflow::<8>))
-        }
-    }
-
-    #[cfg_attr(
-        feature = "tracing",
-        tracing::instrument(level = "trace", ret, skip_all, fields(ty = "i16"))
-    )]
-    fn read_i16_leb128(&mut self) -> impl Future<Output = std::io::Result<i16>>
-    where
-        Self: Unpin,
-    {
-        async move {
-            let mut x = 0;
-            let mut s = 0u8;
-            for _ in 0..3 {
-                let b = self.read_u8().await?;
-                if s == 14 && !is_sign_extended(b, 2) {
-                    return Err(invalid_data(Overflow::<16>));
-                }
-                x |= (i16::from(b) & 0x7f) << s;
-                s += 7;
-                if b & 0x80 == 0 {
-                    if s != 21 && b & 0x40 != 0 {
-                        return Ok(x | !0 << s);
-                    } else {
-                        return Ok(x);
-                    }
-                }
-            }
-            Err(invalid_data(Overflow::<16>))
-        }
-    }
-
-    #[cfg_attr(
-        feature = "tracing",
-        tracing::instrument(level = "trace", ret, skip_all, fields(ty = "i32"))
-    )]
-    fn read_i32_leb128(&mut self) -> impl Future<Output = std::io::Result<i32>>
-    where
-        Self: Unpin,
-    {
-        async move {
-            let mut x = 0;
-            let mut s = 0u8;
-            for _ in 0..5 {
-                let b = self.read_u8().await?;
-                if s == 28 && !is_sign_extended(b, 4) {
-                    return Err(invalid_data(Overflow::<32>));
-                }
-                x |= (i32::from(b) & 0x7f) << s;
-                s += 7;
-                if b & 0x80 == 0 {
-                    if s != 35 && b & 0x40 != 0 {
-                        return Ok(x | !0 << s);
-                    } else {
-                        return Ok(x);
-                    }
-                }
-            }
-            Err(invalid_data(Overflow::<32>))
-        }
-    }
-
-    #[cfg_attr(
-        feature = "tracing",
-        tracing::instrument(level = "trace", ret, skip_all, fields(ty = "i64"))
-    )]
-    fn read_i64_leb128(&mut self) -> impl Future<Output = std::io::Result<i64>>
-    where
-        Self: Unpin,
-    {
-        async move {
-            let mut x = 0;
-            let mut s = 0u8;
-            for _ in 0..10 {
-                let b = self.read_u8().await?;
-                if s == 63 && !is_sign_extended(b, 1) {
-                    return Err(invalid_data(Overflow::<64>));
-                }
-                x |= (i64::from(b) & 0x7f) << s;
-                s += 7;
-                if b & 0x80 == 0 {
-                    if s != 70 && b & 0x40 != 0 {
-                        return Ok(x | !0 << s);
-                    } else {
-                        return Ok(x);
-                    }
-                }
-            }
-            Err(invalid_data(Overflow::<64>))
-        }
-    }
-
-    #[cfg_attr(
-        feature = "tracing",
-        tracing::instrument(level = "trace", ret, skip_all, fields(ty = "i128"))
-    )]
-    fn read_i128_leb128(&mut self) -> impl Future<Output = std::io::Result<i128>>
-    where
-        Self: Unpin,
-    {
-        async move {
-            let mut x = 0;
-            let mut s = 0u8;
-            for _ in 0..19 {
-                let b = self.read_u8().await?;
-                if s == 126 && !is_sign_extended(b, 2) {
-                    return Err(invalid_data(Overflow::<128>));
-                }
-                x |= (i128::from(b) & 0x7f) << s;
-                s += 7;
-                if b & 0x80 == 0 {
-                    if s != 133 && b & 0x40 != 0 {
-                        return Ok(x | !0 << s);
-                    } else {
-                        return Ok(x);
-                    }
-                }
-            }
-            Err(invalid_data(Overflow::<128>))
-        }
-    }
+    read_leb128!(read_i8_leb128, i8, decode_signed_leb128);
+    read_leb128!(read_i16_leb128, i16, decode_signed_leb128);
+    read_leb128!(read_i32_leb128, i32, decode_signed_leb128);
+    read_leb128!(read_i64_leb128, i64, decode_signed_leb128);
+    read_leb128!(read_i128_leb128, i128, decode_signed_leb128);
 }
 
 impl<T: AsyncRead> AsyncReadLeb128 for T {}
 
-pub fn put_u8_leb128(buf: &mut [u8; 2], mut x: u8) -> &mut [u8] {
-    let mut i = 0;
-    while x >= 0x80 {
-        buf[i] = x | 0x80;
-        x >>= 7;
-        i += 1;
-    }
-    buf[i] = x;
-    &mut buf[..=i]
-}
-
-pub fn put_u16_leb128(buf: &mut [u8; 3], mut x: u16) -> &mut [u8] {
-    let mut i = 0;
-    while x >= 0x80 {
-        buf[i] = (x as u8) | 0x80;
-        x >>= 7;
-        i += 1;
-    }
-    buf[i] = x as u8;
-    &mut buf[..=i]
-}
-
-pub fn put_u32_leb128(buf: &mut [u8; 5], mut x: u32) -> &mut [u8] {
-    let mut i = 0;
-    while x >= 0x80 {
-        buf[i] = (x as u8) | 0x80;
-        x >>= 7;
-        i += 1;
-    }
-    buf[i] = x as u8;
-    &mut buf[..=i]
-}
-
-pub fn put_u64_leb128(buf: &mut [u8; 10], mut x: u64) -> &mut [u8] {
-    let mut i = 0;
-    while x >= 0x80 {
-        buf[i] = (x as u8) | 0x80;
-        x >>= 7;
-        i += 1;
-    }
-    buf[i] = x as u8;
-    &mut buf[..=i]
-}
-
-pub fn put_u128_leb128(buf: &mut [u8; 19], mut x: u128) -> &mut [u8] {
-    let mut i = 0;
-    while x >= 0x80 {
-        buf[i] = (x as u8) | 0x80;
-        x >>= 7;
-        i += 1;
-    }
-    buf[i] = x as u8;
-    &mut buf[..=i]
-}
-
-pub fn put_i8_leb128(buf: &mut [u8; 2], mut x: i8) -> &mut [u8] {
-    let mut i = 0;
-    loop {
-        let b = x as u8;
-        x >>= 6;
-        if x == 0 || x == !0 {
-            buf[i] = b & 0x7f;
-            return &mut buf[..=i];
-        } else {
-            buf[i] = b | 0x80;
-            x >>= 1;
+macro_rules! write_leb128 {
+    ($f:ident, $t:ident, $put:ident) => {
+        #[cfg_attr(
+                    feature = "tracing",
+                    tracing::instrument(level = "trace", ret, skip_all, fields(ty = stringify!($t)))
+                )]
+        fn $f(&mut self, x: $t) -> impl Future<Output = std::io::Result<()>>
+        where
+            Self: Unpin,
+        {
+            async move { self.write_all($put(&mut Default::default(), x)).await }
         }
-        i += 1;
-    }
-}
-
-pub fn put_i16_leb128(buf: &mut [u8; 3], mut x: i16) -> &mut [u8] {
-    let mut i = 0;
-    loop {
-        let b = x as u8;
-        x >>= 6;
-        if x == 0 || x == !0 {
-            buf[i] = b & 0x7f;
-            return &mut buf[..=i];
-        } else {
-            buf[i] = b | 0x80;
-            x >>= 1;
-        }
-        i += 1;
-    }
-}
-
-pub fn put_i32_leb128(buf: &mut [u8; 5], mut x: i32) -> &mut [u8] {
-    let mut i = 0;
-    loop {
-        let b = x as u8;
-        x >>= 6;
-        if x == 0 || x == !0 {
-            buf[i] = b & 0x7f;
-            return &mut buf[..=i];
-        } else {
-            buf[i] = b | 0x80;
-            x >>= 1;
-        }
-        i += 1;
-    }
-}
-
-pub fn put_i64_leb128(buf: &mut [u8; 10], mut x: i64) -> &mut [u8] {
-    let mut i = 0;
-    loop {
-        let b = x as u8;
-        x >>= 6;
-        if x == 0 || x == !0 {
-            buf[i] = b & 0x7f;
-            return &mut buf[..=i];
-        } else {
-            buf[i] = b | 0x80;
-            x >>= 1;
-        }
-        i += 1;
-    }
-}
-
-pub fn put_i128_leb128(buf: &mut [u8; 19], mut x: i128) -> &mut [u8] {
-    let mut i = 0;
-    loop {
-        let b = x as u8;
-        x >>= 6;
-        if x == 0 || x == !0 {
-            buf[i] = b & 0x7f;
-            return &mut buf[..=i];
-        } else {
-            buf[i] = b | 0x80;
-            x >>= 1;
-        }
-        i += 1;
-    }
+    };
 }
 
 pub trait AsyncWriteLeb128: AsyncWrite {
-    #[cfg_attr(
-        feature = "tracing",
-        tracing::instrument(level = "trace", ret, skip_all, fields(ty = "u8"))
-    )]
-    fn write_u8_leb128(&mut self, x: u8) -> impl Future<Output = std::io::Result<()>>
-    where
-        Self: Unpin,
-    {
-        async move {
-            self.write_all(put_u8_leb128(&mut Default::default(), x))
-                .await
-        }
-    }
-
-    #[cfg_attr(
-        feature = "tracing",
-        tracing::instrument(level = "trace", ret, skip_all, fields(ty = "u16"))
-    )]
-    fn write_u16_leb128(&mut self, x: u16) -> impl Future<Output = std::io::Result<()>>
-    where
-        Self: Unpin,
-    {
-        async move {
-            self.write_all(put_u16_leb128(&mut Default::default(), x))
-                .await
-        }
-    }
-
-    #[cfg_attr(
-        feature = "tracing",
-        tracing::instrument(level = "trace", ret, skip_all, fields(ty = "u32"))
-    )]
-    fn write_u32_leb128(&mut self, x: u32) -> impl Future<Output = std::io::Result<()>>
-    where
-        Self: Unpin,
-    {
-        async move {
-            self.write_all(put_u32_leb128(&mut Default::default(), x))
-                .await
-        }
-    }
-
-    #[cfg_attr(
-        feature = "tracing",
-        tracing::instrument(level = "trace", ret, skip_all, fields(ty = "u64"))
-    )]
-    fn write_u64_leb128(&mut self, x: u64) -> impl Future<Output = std::io::Result<()>>
-    where
-        Self: Unpin,
-    {
-        async move {
-            self.write_all(put_u64_leb128(&mut Default::default(), x))
-                .await
-        }
-    }
-
-    #[cfg_attr(
-        feature = "tracing",
-        tracing::instrument(level = "trace", ret, skip_all, fields(ty = "u128"))
-    )]
-    fn write_u128_leb128(&mut self, x: u128) -> impl Future<Output = std::io::Result<()>>
-    where
-        Self: Unpin,
-    {
-        async move {
-            self.write_all(put_u128_leb128(&mut Default::default(), x))
-                .await
-        }
-    }
-
-    #[cfg_attr(
-        feature = "tracing",
-        tracing::instrument(level = "trace", ret, skip_all, fields(ty = "i8"))
-    )]
-    fn write_i8_leb128(&mut self, x: i8) -> impl Future<Output = std::io::Result<()>>
-    where
-        Self: Unpin,
-    {
-        async move {
-            self.write_all(put_i8_leb128(&mut Default::default(), x))
-                .await
-        }
-    }
-
-    #[cfg_attr(
-        feature = "tracing",
-        tracing::instrument(level = "trace", ret, skip_all, fields(ty = "i16"))
-    )]
-    fn write_i16_leb128(&mut self, x: i16) -> impl Future<Output = std::io::Result<()>>
-    where
-        Self: Unpin,
-    {
-        async move {
-            self.write_all(put_i16_leb128(&mut Default::default(), x))
-                .await
-        }
-    }
-
-    #[cfg_attr(
-        feature = "tracing",
-        tracing::instrument(level = "trace", ret, skip_all, fields(ty = "i32"))
-    )]
-    fn write_i32_leb128(&mut self, x: i32) -> impl Future<Output = std::io::Result<()>>
-    where
-        Self: Unpin,
-    {
-        async move {
-            self.write_all(put_i32_leb128(&mut Default::default(), x))
-                .await
-        }
-    }
-
-    #[cfg_attr(
-        feature = "tracing",
-        tracing::instrument(level = "trace", ret, skip_all, fields(ty = "i64"))
-    )]
-    fn write_i64_leb128(&mut self, x: i64) -> impl Future<Output = std::io::Result<()>>
-    where
-        Self: Unpin,
-    {
-        async move {
-            self.write_all(put_i64_leb128(&mut Default::default(), x))
-                .await
-        }
-    }
-
-    #[cfg_attr(
-        feature = "tracing",
-        tracing::instrument(level = "trace", ret, skip_all, fields(ty = "i128"))
-    )]
-    fn write_i128_leb128(&mut self, x: i128) -> impl Future<Output = std::io::Result<()>>
-    where
-        Self: Unpin,
-    {
-        async move {
-            self.write_all(put_i128_leb128(&mut Default::default(), x))
-                .await
-        }
-    }
+    write_leb128!(write_u8_leb128, u8, put_u8_leb128);
+    write_leb128!(write_u16_leb128, u16, put_u16_leb128);
+    write_leb128!(write_u32_leb128, u32, put_u32_leb128);
+    write_leb128!(write_u64_leb128, u64, put_u64_leb128);
+    write_leb128!(write_u128_leb128, u128, put_u128_leb128);
+    write_leb128!(write_i8_leb128, i8, put_i8_leb128);
+    write_leb128!(write_i16_leb128, i16, put_i16_leb128);
+    write_leb128!(write_i32_leb128, i32, put_i32_leb128);
+    write_leb128!(write_i64_leb128, i64, put_i64_leb128);
+    write_leb128!(write_i128_leb128, i128, put_i128_leb128);
 }
 
 impl<T: AsyncWrite> AsyncWriteLeb128 for T {}
@@ -818,356 +229,6 @@ where
                 Err(std::io::Error::from(std::io::ErrorKind::UnexpectedEof).into())
             }
         }
-    }
-}
-
-#[derive(Copy, Clone, Debug, Default, Eq, PartialEq)]
-pub struct Leb128DecoderU8;
-
-impl Decoder for Leb128DecoderU8 {
-    type Item = u8;
-    type Error = std::io::Error;
-
-    fn decode(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
-        let mut x = 0;
-        let mut s = 0u8;
-        for i in 0..2 {
-            let Some(b) = src.get(i) else {
-                src.reserve(1);
-                return Ok(None);
-            };
-            if s == 7 && *b > 0x01 {
-                return Err(invalid_data(Overflow::<8>));
-            }
-            x |= (b & 0x7f) << s;
-            if b & 0x80 == 0 {
-                src.advance(i + 1);
-                return Ok(Some(x));
-            }
-            s += 7;
-        }
-        Err(invalid_data(Overflow::<8>))
-    }
-
-    fn decode_eof(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
-        stateless_decode_eof(self, src)
-    }
-}
-
-#[derive(Copy, Clone, Debug, Default, Eq, PartialEq)]
-pub struct Leb128DecoderU16;
-
-impl Decoder for Leb128DecoderU16 {
-    type Item = u16;
-    type Error = std::io::Error;
-
-    fn decode(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
-        let mut x = 0;
-        let mut s = 0u8;
-        for i in 0..3 {
-            let Some(b) = src.get(i) else {
-                src.reserve(1);
-                return Ok(None);
-            };
-            if s == 14 && *b > 0x03 {
-                return Err(invalid_data(Overflow::<16>));
-            }
-            x |= (u16::from(*b) & 0x7f) << s;
-            if b & 0x80 == 0 {
-                src.advance(i + 1);
-                return Ok(Some(x));
-            }
-            s += 7;
-        }
-        Err(invalid_data(Overflow::<16>))
-    }
-
-    fn decode_eof(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
-        stateless_decode_eof(self, src)
-    }
-}
-
-#[derive(Copy, Clone, Debug, Default, Eq, PartialEq)]
-pub struct Leb128DecoderU32;
-
-impl Decoder for Leb128DecoderU32 {
-    type Item = u32;
-    type Error = std::io::Error;
-
-    fn decode(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
-        let mut x = 0;
-        let mut s = 0u8;
-        for i in 0..5 {
-            let Some(b) = src.get(i) else {
-                src.reserve(1);
-                return Ok(None);
-            };
-            if s == 28 && *b > 0x0f {
-                return Err(invalid_data(Overflow::<32>));
-            }
-            x |= (u32::from(*b) & 0x7f) << s;
-            if b & 0x80 == 0 {
-                src.advance(i + 1);
-                return Ok(Some(x));
-            }
-            s += 7;
-        }
-        Err(invalid_data(Overflow::<32>))
-    }
-
-    fn decode_eof(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
-        stateless_decode_eof(self, src)
-    }
-}
-
-#[derive(Copy, Clone, Debug, Default, Eq, PartialEq)]
-pub struct Leb128DecoderU64;
-
-impl Decoder for Leb128DecoderU64 {
-    type Item = u64;
-    type Error = std::io::Error;
-
-    fn decode(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
-        let mut x = 0;
-        let mut s = 0u8;
-        for i in 0..10 {
-            let Some(b) = src.get(i) else {
-                src.reserve(1);
-                return Ok(None);
-            };
-            if s == 63 && *b > 0x01 {
-                return Err(invalid_data(Overflow::<64>));
-            }
-            x |= (u64::from(*b) & 0x7f) << s;
-            if b & 0x80 == 0 {
-                src.advance(i + 1);
-                return Ok(Some(x));
-            }
-            s += 7;
-        }
-        Err(invalid_data(Overflow::<64>))
-    }
-
-    fn decode_eof(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
-        stateless_decode_eof(self, src)
-    }
-}
-
-#[derive(Copy, Clone, Debug, Default, Eq, PartialEq)]
-pub struct Leb128DecoderU128;
-
-impl Decoder for Leb128DecoderU128 {
-    type Item = u128;
-    type Error = std::io::Error;
-
-    fn decode(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
-        let mut x = 0;
-        let mut s = 0u8;
-        for i in 0..19 {
-            let Some(b) = src.get(i) else {
-                src.reserve(1);
-                return Ok(None);
-            };
-            if s == 126 && *b > 0x03 {
-                return Err(invalid_data(Overflow::<128>));
-            }
-            x |= (u128::from(*b) & 0x7f) << s;
-            if b & 0x80 == 0 {
-                src.advance(i + 1);
-                return Ok(Some(x));
-            }
-            s += 7;
-        }
-        Err(invalid_data(Overflow::<128>))
-    }
-
-    fn decode_eof(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
-        stateless_decode_eof(self, src)
-    }
-}
-
-#[derive(Copy, Clone, Debug, Default, Eq, PartialEq)]
-pub struct Leb128DecoderI8;
-
-impl Decoder for Leb128DecoderI8 {
-    type Item = i8;
-    type Error = std::io::Error;
-
-    fn decode(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
-        let mut x = 0;
-        let mut s = 0u8;
-        for i in 0..2 {
-            let Some(b) = src.get(i).copied() else {
-                src.reserve(1);
-                return Ok(None);
-            };
-            if s == 7 && !is_sign_extended(b, 1) {
-                return Err(invalid_data(Overflow::<8>));
-            }
-            x |= ((b as i8) & 0x7f) << s;
-            s += 7;
-            if b & 0x80 == 0 {
-                src.advance(i + 1);
-                if s != 14 && b & 0x40 != 0 {
-                    return Ok(Some(x | !0 << s));
-                } else {
-                    return Ok(Some(x));
-                }
-            }
-        }
-        Err(invalid_data(Overflow::<8>))
-    }
-
-    fn decode_eof(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
-        stateless_decode_eof(self, src)
-    }
-}
-
-#[derive(Copy, Clone, Debug, Default, Eq, PartialEq)]
-pub struct Leb128DecoderI16;
-
-impl Decoder for Leb128DecoderI16 {
-    type Item = i16;
-    type Error = std::io::Error;
-
-    fn decode(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
-        let mut x = 0;
-        let mut s = 0u8;
-        for i in 0..3 {
-            let Some(b) = src.get(i).copied() else {
-                src.reserve(1);
-                return Ok(None);
-            };
-            if s == 14 && !is_sign_extended(b, 2) {
-                return Err(invalid_data(Overflow::<16>));
-            }
-            x |= (i16::from(b) & 0x7f) << s;
-            s += 7;
-            if b & 0x80 == 0 {
-                src.advance(i + 1);
-                if s != 21 && b & 0x40 != 0 {
-                    return Ok(Some(x | !0 << s));
-                } else {
-                    return Ok(Some(x));
-                }
-            }
-        }
-        Err(invalid_data(Overflow::<16>))
-    }
-
-    fn decode_eof(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
-        stateless_decode_eof(self, src)
-    }
-}
-
-#[derive(Copy, Clone, Debug, Default, Eq, PartialEq)]
-pub struct Leb128DecoderI32;
-
-impl Decoder for Leb128DecoderI32 {
-    type Item = i32;
-    type Error = std::io::Error;
-
-    fn decode(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
-        let mut x = 0;
-        let mut s = 0u8;
-        for i in 0..5 {
-            let Some(b) = src.get(i).copied() else {
-                src.reserve(1);
-                return Ok(None);
-            };
-            if s == 28 && !is_sign_extended(b, 4) {
-                return Err(invalid_data(Overflow::<32>));
-            }
-            x |= (i32::from(b) & 0x7f) << s;
-            s += 7;
-            if b & 0x80 == 0 {
-                src.advance(i + 1);
-                if s != 35 && b & 0x40 != 0 {
-                    return Ok(Some(x | !0 << s));
-                } else {
-                    return Ok(Some(x));
-                }
-            }
-        }
-        Err(invalid_data(Overflow::<32>))
-    }
-
-    fn decode_eof(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
-        stateless_decode_eof(self, src)
-    }
-}
-
-#[derive(Copy, Clone, Debug, Default, Eq, PartialEq)]
-pub struct Leb128DecoderI64;
-
-impl Decoder for Leb128DecoderI64 {
-    type Item = i64;
-    type Error = std::io::Error;
-
-    fn decode(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
-        let mut x = 0;
-        let mut s = 0u8;
-        for i in 0..10 {
-            let Some(b) = src.get(i).copied() else {
-                src.reserve(1);
-                return Ok(None);
-            };
-            if s == 63 && !is_sign_extended(b, 1) {
-                return Err(invalid_data(Overflow::<64>));
-            }
-            x |= (i64::from(b) & 0x7f) << s;
-            s += 7;
-            if b & 0x80 == 0 {
-                src.advance(i + 1);
-                if s != 70 && b & 0x40 != 0 {
-                    return Ok(Some(x | !0 << s));
-                } else {
-                    return Ok(Some(x));
-                }
-            }
-        }
-        Err(invalid_data(Overflow::<64>))
-    }
-
-    fn decode_eof(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
-        stateless_decode_eof(self, src)
-    }
-}
-
-#[derive(Copy, Clone, Debug, Default, Eq, PartialEq)]
-pub struct Leb128DecoderI128;
-
-impl Decoder for Leb128DecoderI128 {
-    type Item = i128;
-    type Error = std::io::Error;
-
-    fn decode(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
-        let mut x = 0;
-        let mut s = 0u8;
-        for i in 0..19 {
-            let Some(b) = src.get(i).copied() else {
-                src.reserve(1);
-                return Ok(None);
-            };
-            if s == 126 && !is_sign_extended(b, 2) {
-                return Err(invalid_data(Overflow::<128>));
-            }
-            x |= (i128::from(b) & 0x7f) << s;
-            s += 7;
-            if b & 0x80 == 0 {
-                src.advance(i + 1);
-                if s != 133 && b & 0x40 != 0 {
-                    return Ok(Some(x | !0 << s));
-                } else {
-                    return Ok(Some(x));
-                }
-            }
-        }
-        Err(invalid_data(Overflow::<128>))
-    }
-
-    fn decode_eof(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
-        stateless_decode_eof(self, src)
     }
 }
 
@@ -1202,16 +263,93 @@ macro_rules! impl_encode {
     };
 }
 
-impl_encode!(u8, put_u8_leb128);
-impl_encode!(u16, put_u16_leb128);
-impl_encode!(u32, put_u32_leb128);
-impl_encode!(u64, put_u64_leb128);
-impl_encode!(u128, put_u128_leb128);
-impl_encode!(i8, put_i8_leb128);
-impl_encode!(i16, put_i16_leb128);
-impl_encode!(i32, put_i32_leb128);
-impl_encode!(i64, put_i64_leb128);
-impl_encode!(i128, put_i128_leb128);
+macro_rules! leb128_decoder {
+    ($t:ident, $decoder:ident, $decode:ident) => {
+        #[derive(Copy, Clone, Debug, Default, Eq, PartialEq)]
+        pub struct $decoder;
+
+        impl Decoder for $decoder {
+            type Item = $t;
+            type Error = std::io::Error;
+
+            fn decode(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
+                $decode!(
+                    $t,
+                    i => {
+                        let Some(b) = src.get(i).copied() else {
+                            src.reserve(1);
+                            return Ok(None);
+                        };
+                        b
+                    },
+                    x => {
+                        src.advance(i + 1);
+                        Ok(Some(x))
+                    }
+                )
+            }
+
+            fn decode_eof(
+                &mut self,
+                src: &mut BytesMut,
+            ) -> Result<Option<Self::Item>, Self::Error> {
+                stateless_decode_eof(self, src)
+            }
+        }
+    };
+}
+
+macro_rules! unsigned_leb128 {
+    ($t:ident, $put:ident, $decoder:ident) => {
+        pub fn $put(buf: &mut [u8; <$t>::BITS.div_ceil(7) as usize], mut x: $t) -> &mut [u8] {
+            let mut i = 0;
+            while x >= 0x80 {
+                buf[i] = (x as u8) | 0x80;
+                x >>= 7;
+                i += 1;
+            }
+            buf[i] = x as u8;
+            &mut buf[..=i]
+        }
+
+        leb128_decoder!($t, $decoder, decode_unsigned_leb128);
+        impl_encode!($t, $put);
+    };
+}
+
+macro_rules! signed_leb128 {
+    ($t:ident, $put:ident, $decoder:ident) => {
+        pub fn $put(buf: &mut [u8; <$t>::BITS.div_ceil(7) as usize], mut x: $t) -> &mut [u8] {
+            let mut i = 0;
+            loop {
+                let b = x as u8;
+                x >>= 6;
+                if x == 0 || x == !0 {
+                    buf[i] = b & 0x7f;
+                    return &mut buf[..=i];
+                } else {
+                    buf[i] = b | 0x80;
+                    x >>= 1;
+                }
+                i += 1;
+            }
+        }
+
+        leb128_decoder!($t, $decoder, decode_signed_leb128);
+        impl_encode!($t, $put);
+    };
+}
+
+unsigned_leb128!(u8, put_u8_leb128, Leb128DecoderU8);
+unsigned_leb128!(u16, put_u16_leb128, Leb128DecoderU16);
+unsigned_leb128!(u32, put_u32_leb128, Leb128DecoderU32);
+unsigned_leb128!(u64, put_u64_leb128, Leb128DecoderU64);
+unsigned_leb128!(u128, put_u128_leb128, Leb128DecoderU128);
+signed_leb128!(i8, put_i8_leb128, Leb128DecoderI8);
+signed_leb128!(i16, put_i16_leb128, Leb128DecoderI16);
+signed_leb128!(i32, put_i32_leb128, Leb128DecoderI32);
+signed_leb128!(i64, put_i64_leb128, Leb128DecoderI64);
+signed_leb128!(i128, put_i128_leb128, Leb128DecoderI128);
 
 #[cfg(test)]
 mod tests {
@@ -1588,6 +726,26 @@ mod tests {
             .expect("failed to read u2");
         assert_eq!(v, 2);
 
+        let v = [0x03]
+            .as_slice()
+            .read_var_u8_leb128(2)
+            .await
+            .expect("failed to read u2");
+        assert_eq!(v, 3);
+
+        let v = [0xff, 0x03]
+            .as_slice()
+            .read_var_u16_leb128(9)
+            .await
+            .expect("failed to read u9");
+        assert_eq!(v, 0x1ff);
+
+        [0xff, 0x04]
+            .as_slice()
+            .read_var_u16_leb128(9)
+            .await
+            .expect_err("u9 read should have failed, since it encoded 10 bits");
+
         [0b100]
             .as_slice()
             .read_var_u8_leb128(2)
@@ -1599,6 +757,32 @@ mod tests {
             .read_var_u16_leb128(9)
             .await
             .expect_err("u9 read should have failed, since it used over 9 bits");
+
+        let v = [0x7f]
+            .as_slice()
+            .read_var_u8_leb128(7)
+            .await
+            .expect("failed to read u7");
+        assert_eq!(v, 0x7f);
+
+        [0x85, 0x00]
+            .as_slice()
+            .read_var_u8_leb128(7)
+            .await
+            .expect_err("u7 read should have failed, since it used over 1 byte");
+
+        [0x80, 0x80, 0x00]
+            .as_slice()
+            .read_var_u16_leb128(14)
+            .await
+            .expect_err("u14 read should have failed, since it used over 2 bytes");
+
+        let err = [0x01]
+            .as_slice()
+            .read_var_u8_leb128(20)
+            .await
+            .expect_err("u20 read into u8 should have failed");
+        assert_eq!(err.kind(), std::io::ErrorKind::InvalidInput);
 
         let v = [0x80, 0x80, 0x80, 0x80, 0x80, 0x01]
             .as_slice()
