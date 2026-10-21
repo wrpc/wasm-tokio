@@ -175,7 +175,7 @@ checksum = "20870f649af7073d53e38067b2a84312175d56ea15217e1b15bc83506ec50afb"
 
 [[package]]
 name = "leb128-tokio"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "tokio",
  "tokio-util",
@@ -483,7 +483,7 @@ checksum = "ba73ea9cf16a25df0c8caa16c51acb937d5712a8429db78a3ee29d5dcacd3a65"
 
 [[package]]
 name = "wasm-tokio"
-version = "0.8.0"
+version = "0.8.1"
 dependencies = [
  "futures",
  "leb128-tokio",
