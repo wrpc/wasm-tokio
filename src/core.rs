@@ -95,13 +95,20 @@ impl<const MAX_INITIAL_CAPACITY: usize> Decoder for CoreNameDecoder<MAX_INITIAL_
     type Error = std::io::Error;
 
     fn decode(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
-        let Some(buf) = self.0.decode(src)? else {
-            return Ok(None);
-        };
-        let s = str::from_utf8(&buf)
-            .map_err(|err| std::io::Error::new(std::io::ErrorKind::InvalidData, err))?;
-        Ok(Some(s.to_string()))
+        let v = self.0.decode(src)?;
+        v.map(bytes_to_string).transpose()
     }
+
+    fn decode_eof(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
+        let v = self.0.decode_eof(src)?;
+        v.map(bytes_to_string).transpose()
+    }
+}
+
+fn bytes_to_string(buf: Bytes) -> std::io::Result<String> {
+    let s = str::from_utf8(&buf)
+        .map_err(|err| std::io::Error::new(std::io::ErrorKind::InvalidData, err))?;
+    Ok(s.to_string())
 }
 
 /// [`core:vec`](https://webassembly.github.io/spec/core/binary/conventions.html#binary-vec) encoder
@@ -313,23 +320,21 @@ where
     }
 }
 
-impl<T, const MAX_INITIAL_CAPACITY: usize> Default for CoreVecDecoder<T, MAX_INITIAL_CAPACITY>
+impl<T, const MAX_INITIAL_CAPACITY: usize> CoreVecDecoder<T, MAX_INITIAL_CAPACITY>
 where
     T: Decoder + Default,
 {
-    fn default() -> Self {
-        Self::new(T::default())
+    fn reset(&mut self) {
+        self.dec = T::default();
+        self.cap = 0;
+        self.ret = Vec::default();
     }
-}
 
-impl<T, const MAX_INITIAL_CAPACITY: usize> Decoder for CoreVecDecoder<T, MAX_INITIAL_CAPACITY>
-where
-    T: Decoder,
-{
-    type Item = Vec<T::Item>;
-    type Error = T::Error;
-
-    fn decode(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
+    fn decode_elements(
+        &mut self,
+        src: &mut BytesMut,
+        mut decode: impl FnMut(&mut T, &mut BytesMut) -> Result<Option<T::Item>, T::Error>,
+    ) -> Result<Option<Vec<T::Item>>, T::Error> {
         if self.cap == 0 {
             let Some(len) = Leb128DecoderU32.decode(src)? else {
                 return Ok(None);
@@ -346,18 +351,50 @@ where
             );
         }
         while self.cap > 0 {
-            let v = match self.dec.decode(src) {
+            let v = match decode(&mut self.dec, src) {
                 Ok(Some(v)) => v,
                 Ok(None) => return Ok(None),
                 Err(err) => {
-                    self.cap = 0;
+                    self.reset();
                     return Err(err);
                 }
             };
             self.ret.push(v);
-            self.cap -= 1;
+            self.cap = self.cap.saturating_sub(1);
         }
         Ok(Some(mem::take(&mut self.ret)))
+    }
+}
+
+impl<T, const MAX_INITIAL_CAPACITY: usize> Default for CoreVecDecoder<T, MAX_INITIAL_CAPACITY>
+where
+    T: Decoder + Default,
+{
+    fn default() -> Self {
+        Self::new(T::default())
+    }
+}
+
+impl<T, const MAX_INITIAL_CAPACITY: usize> Decoder for CoreVecDecoder<T, MAX_INITIAL_CAPACITY>
+where
+    T: Decoder + Default,
+{
+    type Item = Vec<T::Item>;
+    type Error = T::Error;
+
+    fn decode(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
+        self.decode_elements(src, T::decode)
+    }
+
+    fn decode_eof(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
+        match self.decode_elements(src, T::decode_eof)? {
+            Some(frame) => Ok(Some(frame)),
+            None if self.cap == 0 && src.is_empty() => Ok(None),
+            None => {
+                self.reset();
+                Err(std::io::Error::from(std::io::ErrorKind::UnexpectedEof).into())
+            }
+        }
     }
 }
 
@@ -421,15 +458,67 @@ impl<const MAX_INITIAL_CAPACITY: usize> Decoder for CoreVecDecoderBytes<MAX_INIT
         self.0 = 0;
         Ok(Some(buf.freeze()))
     }
+
+    fn decode_eof(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
+        match self.decode(src)? {
+            Some(frame) => Ok(Some(frame)),
+            None => {
+                if self.0 == 0 && src.is_empty() {
+                    Ok(None)
+                } else {
+                    self.0 = 0;
+                    Err(std::io::ErrorKind::UnexpectedEof.into())
+                }
+            }
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use futures::{SinkExt as _, TryStreamExt as _};
-    use tokio_util::codec::{FramedRead, FramedWrite};
+    use tokio_util::codec::{FramedRead, FramedWrite, LinesCodec};
     use tracing::trace;
 
     use super::*;
+
+    #[test_log::test]
+    fn vec_reset_on_eof() {
+        let mut dec = CoreVecDecoder::<CoreNameDecoder>::default();
+        let mut src = BytesMut::from(b"\x02\x01a\x02".as_slice());
+        let err = dec
+            .decode_eof(&mut src)
+            .expect_err("truncated vec must fail");
+        assert_eq!(err.kind(), std::io::ErrorKind::UnexpectedEof);
+        let mut src = BytesMut::from(b"\x01\x01b".as_slice());
+        assert_eq!(dec.decode(&mut src).unwrap().unwrap(), ["b"]);
+    }
+
+    #[test_log::test]
+    fn vec_inner_eof_value() {
+        let mut dec = CoreVecDecoder::<LinesCodec>::default();
+        let mut src = BytesMut::from(b"\x02a\nb".as_slice());
+        assert_eq!(dec.decode_eof(&mut src).unwrap().unwrap(), ["a", "b"]);
+
+        let mut dec = CoreVecDecoder::<crate::cm::U32Codec>::default();
+        let mut src = BytesMut::from(b"\x01\x80".as_slice());
+        let err = dec
+            .decode_eof(&mut src)
+            .expect_err("truncated vec must fail");
+        assert_eq!(err.kind(), std::io::ErrorKind::UnexpectedEof);
+    }
+
+    #[test_log::test]
+    fn bytes_reset_on_eof() {
+        let mut dec = <CoreVecDecoderBytes>::default();
+        let mut src = BytesMut::from(b"\x03ab".as_slice());
+        let err = dec
+            .decode_eof(&mut src)
+            .expect_err("truncated bytes must fail");
+        assert_eq!(err.kind(), std::io::ErrorKind::UnexpectedEof);
+        let mut src = BytesMut::from(b"\x01c".as_slice());
+        assert_eq!(dec.decode(&mut src).unwrap().unwrap(), "c");
+    }
 
     #[test_log::test(tokio::test)]
     async fn string() {
@@ -604,6 +693,7 @@ mod tests {
         let mut dec = CoreVecDecoder::<CoreNameDecoder>::default();
         let mut src = BytesMut::from(b"\x03\x01a\x01\xff".as_slice());
         dec.decode(&mut src).expect_err("invalid UTF-8 must fail");
+        assert_eq!(dec.ret.capacity(), 0);
         let mut src = BytesMut::from(b"\x01\x01b".as_slice());
         assert_eq!(dec.decode(&mut src).unwrap().unwrap(), ["b"]);
     }

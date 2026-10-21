@@ -1,6 +1,6 @@
 [package]
 name = "wasm-tokio"
-version = "0.7.0"
+version = "0.8.0"
 description = "Streaming WebAssembly codec based on Tokio"
 
 authors.workspace = true
@@ -25,13 +25,13 @@ tracing = ["dep:tracing", "leb128-tokio/tracing"]
 
 [workspace.dependencies]
 futures = { version = "0.3", default-features = false }
-leb128-tokio = { version = "0.1.8", path = "./leb128-tokio", default-features = false }
+leb128-tokio = { version = "0.2.0", path = "./leb128-tokio", default-features = false }
 test-log = { version = "0.2", default-features = false }
 tokio = { version = "1", default-features = false }
 tokio-util = { version = "0.7.9", default-features = false }
 tracing = { version = "0.1", default-features = false }
 tracing-subscriber = { version = "0.3", default-features = false }
-utf8-tokio = { version = "0.2", path = "./utf8-tokio", default-features = false }
+utf8-tokio = { version = "0.3.0", path = "./utf8-tokio", default-features = false }
 
 [dependencies]
 leb128-tokio = { workspace = true }
@@ -44,4 +44,5 @@ utf8-tokio = { workspace = true }
 futures = { workspace = true }
 test-log = { workspace = true, features = ["color", "log", "trace"] }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
