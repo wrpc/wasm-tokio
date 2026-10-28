@@ -463,6 +463,9 @@ impl Decoder for U64Codec {
     }
 }
 
+const CANONICAL_NAN_F32: u32 = 0x7fc0_0000;
+const CANONICAL_NAN_F64: u64 = 0x7ff8_0000_0000_0000;
+
 #[derive(Copy, Clone, Debug, Default, Eq, PartialEq)]
 pub struct F32Codec;
 
@@ -472,7 +475,11 @@ impl Encoder<f32> for F32Codec {
     #[cfg_attr(feature = "tracing", tracing::instrument(level = "trace", ret))]
     fn encode(&mut self, item: f32, dst: &mut BytesMut) -> Result<(), Self::Error> {
         dst.reserve(4);
-        dst.put_f32_le(item);
+        if item.is_nan() {
+            dst.put_u32_le(CANONICAL_NAN_F32);
+        } else {
+            dst.put_f32_le(item);
+        }
         Ok(())
     }
 }
@@ -504,7 +511,11 @@ impl Encoder<f64> for F64Codec {
     #[cfg_attr(feature = "tracing", tracing::instrument(level = "trace", ret))]
     fn encode(&mut self, item: f64, dst: &mut BytesMut) -> Result<(), Self::Error> {
         dst.reserve(8);
-        dst.put_f64_le(item);
+        if item.is_nan() {
+            dst.put_u64_le(CANONICAL_NAN_F64);
+        } else {
+            dst.put_f64_le(item);
+        }
         Ok(())
     }
 }
@@ -1818,5 +1829,99 @@ mod tests {
         assert_eq!(err.kind(), std::io::ErrorKind::UnexpectedEof);
 
         assert!(U32Codec.decode_eof(&mut BytesMut::new()).unwrap().is_none());
+    }
+
+    #[test_log::test]
+    fn canonical_nan_f32() {
+        for bits in [
+            0x7f80_0001_u32,
+            0x7fa0_0000,
+            0x7fc0_0001,
+            0x7fff_ffff,
+            0xff80_0001,
+            0xffc0_0000,
+            0xffff_ffff,
+        ] {
+            let nan = f32::from_bits(bits);
+            let mut buf = BytesMut::default();
+            F32Codec.encode(nan, &mut buf).unwrap();
+            assert_eq!(
+                buf.as_ref(),
+                CANONICAL_NAN_F32.to_le_bytes(),
+                "{bits:#010x}"
+            );
+            let mut prim = BytesMut::default();
+            PrimValEncoder.encode(&nan, &mut prim).unwrap();
+            assert_eq!(prim, buf, "{bits:#010x}");
+            let v = F32Codec.decode(&mut buf).unwrap().unwrap();
+            assert_eq!(v.to_bits(), CANONICAL_NAN_F32, "{bits:#010x}");
+            assert!(buf.is_empty());
+        }
+
+        for v in [
+            0.0_f32,
+            -0.0,
+            1.5,
+            -1.5,
+            f32::from_bits(1),
+            f32::MIN_POSITIVE,
+            f32::MAX,
+            f32::INFINITY,
+            f32::NEG_INFINITY,
+        ] {
+            let mut buf = BytesMut::default();
+            F32Codec.encode(v, &mut buf).unwrap();
+            assert_eq!(buf.as_ref(), v.to_bits().to_le_bytes(), "{v}");
+            let decoded = F32Codec.decode(&mut buf).unwrap().unwrap();
+            assert_eq!(decoded.to_bits(), v.to_bits(), "{v}");
+            assert!(buf.is_empty());
+        }
+    }
+
+    #[test_log::test]
+    fn canonical_nan_f64() {
+        for bits in [
+            0x7ff0_0000_0000_0001_u64,
+            0x7ff4_0000_0000_0000,
+            0x7ff8_0000_0000_0001,
+            0x7fff_ffff_ffff_ffff,
+            0xfff0_0000_0000_0001,
+            0xfff8_0000_0000_0000,
+            0xffff_ffff_ffff_ffff,
+        ] {
+            let nan = f64::from_bits(bits);
+            let mut buf = BytesMut::default();
+            F64Codec.encode(nan, &mut buf).unwrap();
+            assert_eq!(
+                buf.as_ref(),
+                CANONICAL_NAN_F64.to_le_bytes(),
+                "{bits:#018x}"
+            );
+            let mut prim = BytesMut::default();
+            PrimValEncoder.encode(&nan, &mut prim).unwrap();
+            assert_eq!(prim, buf, "{bits:#018x}");
+            let v = F64Codec.decode(&mut buf).unwrap().unwrap();
+            assert_eq!(v.to_bits(), CANONICAL_NAN_F64, "{bits:#018x}");
+            assert!(buf.is_empty());
+        }
+
+        for v in [
+            0.0_f64,
+            -0.0,
+            1.5,
+            -1.5,
+            f64::from_bits(1),
+            f64::MIN_POSITIVE,
+            f64::MAX,
+            f64::INFINITY,
+            f64::NEG_INFINITY,
+        ] {
+            let mut buf = BytesMut::default();
+            F64Codec.encode(v, &mut buf).unwrap();
+            assert_eq!(buf.as_ref(), v.to_bits().to_le_bytes(), "{v}");
+            let decoded = F64Codec.decode(&mut buf).unwrap().unwrap();
+            assert_eq!(decoded.to_bits(), v.to_bits(), "{v}");
+            assert!(buf.is_empty());
+        }
     }
 }
