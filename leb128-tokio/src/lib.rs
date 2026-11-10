@@ -807,7 +807,7 @@ mod tests {
         assert_eq!(err.kind(), std::io::ErrorKind::UnexpectedEof);
 
         assert!(Leb128DecoderU32
-            .decode_eof(&mut BytesMut::new())
+            .decode_eof(&mut BytesMut::default())
             .unwrap()
             .is_none());
     }
