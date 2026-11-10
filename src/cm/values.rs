@@ -1550,6 +1550,15 @@ mod tests {
     }
 
     #[test_log::test]
+    fn tuple_max_len() {
+        let mut dec = TupleDecoder::new((U8Codec, <CoreNameDecoder>::with_max_len(1)));
+        let err = dec
+            .decode(&mut BytesMut::from(b"\x01\x02ab".as_slice()))
+            .expect_err("long name must fail");
+        assert_eq!(err.kind(), std::io::ErrorKind::InvalidData);
+    }
+
+    #[test_log::test]
     fn tuple_truncated_eof() {
         let mut dec = TupleDecoder::<
             (BoolCodec, OptionDecoder<CoreNameDecoder>),
