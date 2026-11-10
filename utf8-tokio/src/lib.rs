@@ -279,7 +279,7 @@ mod tests {
         assert_eq!(err.kind(), std::io::ErrorKind::UnexpectedEof);
 
         assert!(Utf8Codec
-            .decode_eof(&mut BytesMut::new())
+            .decode_eof(&mut BytesMut::default())
             .unwrap()
             .is_none());
     }

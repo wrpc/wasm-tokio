@@ -571,7 +571,7 @@ mod tests {
 
     #[test_log::test(tokio::test)]
     async fn read_name_max_len() {
-        let mut s = String::new();
+        let mut s = String::default();
         b"\x03foo"
             .as_slice()
             .read_core_name(&mut s, 3)
@@ -590,7 +590,7 @@ mod tests {
 
     #[test_log::test(tokio::test)]
     async fn string() {
-        let mut s = String::new();
+        let mut s = String::default();
         "\x04test"
             .as_bytes()
             .read_core_name(&mut s, u32::MAX)
@@ -604,7 +604,7 @@ mod tests {
             .expect("failed to write string");
         assert_eq!(buf, b"\x04test");
 
-        let mut tx = FramedWrite::new(Vec::new(), CoreNameEncoder);
+        let mut tx = FramedWrite::new(Vec::default(), CoreNameEncoder);
 
         trace!("sending `foo`");
         tx.send("foo").await.expect("failed to send `foo`");
@@ -667,7 +667,7 @@ mod tests {
 
     #[test_log::test(tokio::test)]
     async fn vec() {
-        let mut tx = FramedWrite::new(Vec::new(), CoreVecEncoder(CoreNameEncoder));
+        let mut tx = FramedWrite::new(Vec::default(), CoreVecEncoder(CoreNameEncoder));
 
         trace!("sending [`foo`, ``, `test`, `bar`, `ƒ𐍈Ő`, `baz`]");
         tx.send(&["foo", "", "test", "bar", "ƒ𐍈Ő", "baz"])
@@ -709,7 +709,7 @@ mod tests {
             Some(
                 [
                     "foo".to_string(),
-                    String::new(),
+                    String::default(),
                     "test".to_string(),
                     "bar".to_string(),
                     "ƒ𐍈Ő".to_string(),

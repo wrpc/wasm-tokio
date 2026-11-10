@@ -1654,12 +1654,12 @@ mod tests {
     fn tuple_zero_size() {
         let mut dec = TupleDecoder::<(FlagDecoder<0>,), (Option<Bytes>,)>::default();
         let err = dec
-            .decode(&mut BytesMut::new())
+            .decode(&mut BytesMut::default())
             .expect_err("zero-size tuple must fail");
         assert_eq!(err.kind(), std::io::ErrorKind::InvalidData);
         let mut dec = TupleDecoder::<(FlagDecoder<0>,), (Option<Bytes>,)>::default();
         let err = dec
-            .decode_eof(&mut BytesMut::new())
+            .decode_eof(&mut BytesMut::default())
             .expect_err("zero-size tuple must fail");
         assert_eq!(err.kind(), std::io::ErrorKind::InvalidData);
     }
@@ -1751,7 +1751,10 @@ mod tests {
             .expect_err("truncated tuple must fail");
         assert_eq!(err.kind(), std::io::ErrorKind::UnexpectedEof);
 
-        assert!(U32Codec.decode_eof(&mut BytesMut::new()).unwrap().is_none());
+        assert!(U32Codec
+            .decode_eof(&mut BytesMut::default())
+            .unwrap()
+            .is_none());
     }
 
     #[test_log::test]
