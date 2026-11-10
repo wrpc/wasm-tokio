@@ -10,18 +10,24 @@ use tokio_util::bytes::{BufMut as _, Bytes, BytesMut};
 use tokio_util::codec::{Decoder, Encoder};
 
 pub trait AsyncReadCore: AsyncRead {
-    /// Read [`core:name`](https://webassembly.github.io/spec/core/binary/values.html#names)
+    /// Read [`core:name`](https://webassembly.github.io/spec/core/binary/values.html#names),
+    /// rejecting names longer than `max` bytes with [`std::io::ErrorKind::InvalidData`] before
+    /// reading them
     #[cfg_attr(
         feature = "tracing",
         tracing::instrument(level = "trace", ret, skip_all, fields(ty = "name"))
     )]
-    fn read_core_name(&mut self, s: &mut String) -> impl Future<Output = std::io::Result<()>>
+    fn read_core_name(
+        &mut self,
+        s: &mut String,
+        max: u32,
+    ) -> impl Future<Output = std::io::Result<()>>
     where
         Self: Unpin + Sized,
     {
         async move {
             let n = self.read_u32_leb128().await?;
-            let len = usize::try_from(n).unwrap_or(usize::MAX);
+            let len = check_len(n, max)?;
             let mut buf = Vec::with_capacity(len.min(DEFAULT_MAX_INITIAL_CAPACITY));
             if self.take(n.into()).read_to_end(&mut buf).await? != len {
                 return Err(std::io::ErrorKind::UnexpectedEof.into());
@@ -83,6 +89,13 @@ impl<T: AsRef<str>> Encoder<T> for CoreNameEncoder {
 pub struct CoreNameDecoder<const MAX_INITIAL_CAPACITY: usize = DEFAULT_MAX_INITIAL_CAPACITY>(
     CoreVecDecoderBytes<MAX_INITIAL_CAPACITY>,
 );
+
+impl<const MAX_INITIAL_CAPACITY: usize> CoreNameDecoder<MAX_INITIAL_CAPACITY> {
+    /// Returns a decoder rejecting names longer than `max` bytes
+    pub fn with_max_len(max: u32) -> Self {
+        Self(CoreVecDecoderBytes::with_max_len(max))
+    }
+}
 
 impl<const MAX_INITIAL_CAPACITY: usize> Default for CoreNameDecoder<MAX_INITIAL_CAPACITY> {
     fn default() -> Self {
@@ -290,6 +303,16 @@ where
 /// Default maximum number of bytes decoders preallocate based on a length read from the input
 pub const DEFAULT_MAX_INITIAL_CAPACITY: usize = 1 << 20;
 
+fn check_len(n: u32, max: u32) -> std::io::Result<usize> {
+    if n > max {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!("length `{n}` exceeds the maximum of `{max}`"),
+        ));
+    }
+    usize::try_from(n).map_err(|err| std::io::Error::new(std::io::ErrorKind::InvalidData, err))
+}
+
 /// [`core:vec`](https://webassembly.github.io/spec/core/binary/conventions.html#binary-vec) decoder
 ///
 /// At most `MAX_INITIAL_CAPACITY` bytes are preallocated based on the vector length read from the input
@@ -301,6 +324,7 @@ pub struct CoreVecDecoder<
     dec: T,
     ret: Vec<T::Item>,
     cap: usize,
+    max: u32,
 }
 
 impl<T, const MAX_INITIAL_CAPACITY: usize> CoreVecDecoder<T, MAX_INITIAL_CAPACITY>
@@ -308,10 +332,19 @@ where
     T: Decoder,
 {
     pub fn new(decoder: T) -> Self {
+        Self::with_max_len(decoder, u32::MAX)
+    }
+
+    /// Returns a decoder rejecting vectors with more than `max` elements
+    ///
+    /// This bounds the element count, not memory: each element may be arbitrarily large unless
+    /// `decoder` is limited as well. With zero-sized elements, this limit is what bounds the work.
+    pub fn with_max_len(decoder: T, max: u32) -> Self {
         Self {
             dec: decoder,
             ret: Vec::default(),
             cap: 0,
+            max,
         }
     }
 
@@ -328,12 +361,10 @@ where
             let Some(len) = Leb128DecoderU32.decode(src)? else {
                 return Ok(None);
             };
+            let len = check_len(len, self.max)?;
             if len == 0 {
                 return Ok(Some(Vec::default()));
             }
-            let len = len
-                .try_into()
-                .map_err(|err| std::io::Error::new(std::io::ErrorKind::InvalidInput, err))?;
             self.cap = len;
             self.ret = Vec::with_capacity(
                 len.min(MAX_INITIAL_CAPACITY / mem::size_of::<T::Item>().max(1)),
@@ -404,13 +435,21 @@ impl<T: AsRef<[u8]>> Encoder<T> for CoreVecEncoderBytes {
 ///
 /// At most `MAX_INITIAL_CAPACITY` bytes are preallocated based on the vector length read from the input
 #[derive(Debug)]
-pub struct CoreVecDecoderBytes<const MAX_INITIAL_CAPACITY: usize = DEFAULT_MAX_INITIAL_CAPACITY>(
-    usize,
-);
+pub struct CoreVecDecoderBytes<const MAX_INITIAL_CAPACITY: usize = DEFAULT_MAX_INITIAL_CAPACITY> {
+    n: usize,
+    max: u32,
+}
+
+impl<const MAX_INITIAL_CAPACITY: usize> CoreVecDecoderBytes<MAX_INITIAL_CAPACITY> {
+    /// Returns a decoder rejecting vectors longer than `max` bytes
+    pub fn with_max_len(max: u32) -> Self {
+        Self { n: 0, max }
+    }
+}
 
 impl<const MAX_INITIAL_CAPACITY: usize> Default for CoreVecDecoderBytes<MAX_INITIAL_CAPACITY> {
     fn default() -> Self {
-        Self(0)
+        Self::with_max_len(u32::MAX)
     }
 }
 
@@ -419,24 +458,22 @@ impl<const MAX_INITIAL_CAPACITY: usize> Decoder for CoreVecDecoderBytes<MAX_INIT
     type Error = std::io::Error;
 
     fn decode(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
-        if self.0 == 0 {
+        if self.n == 0 {
             let Some(len) = Leb128DecoderU32.decode(src)? else {
                 return Ok(None);
             };
+            let len = check_len(len, self.max)?;
             if len == 0 {
                 return Ok(Some(Bytes::default()));
             }
-            let len = len
-                .try_into()
-                .map_err(|err| std::io::Error::new(std::io::ErrorKind::InvalidInput, err))?;
-            self.0 = len;
+            self.n = len;
         }
-        if src.len() < self.0 {
-            src.reserve(self.0.saturating_sub(src.len()).min(MAX_INITIAL_CAPACITY));
+        if src.len() < self.n {
+            src.reserve(self.n.saturating_sub(src.len()).min(MAX_INITIAL_CAPACITY));
             return Ok(None);
         }
-        let buf = src.split_to(self.0);
-        self.0 = 0;
+        let buf = src.split_to(self.n);
+        self.n = 0;
         Ok(Some(buf.freeze()))
     }
 
@@ -444,7 +481,7 @@ impl<const MAX_INITIAL_CAPACITY: usize> Decoder for CoreVecDecoderBytes<MAX_INIT
         match self.decode(src)? {
             Some(frame) => Ok(Some(frame)),
             None => {
-                if self.0 == 0 && src.is_empty() {
+                if self.n == 0 && src.is_empty() {
                     Ok(None)
                 } else {
                     Err(std::io::ErrorKind::UnexpectedEof.into())
@@ -504,12 +541,59 @@ mod tests {
         assert_eq!(err.kind(), std::io::ErrorKind::UnexpectedEof);
     }
 
+    #[test_log::test]
+    fn max_len() {
+        let mut dec = <CoreNameDecoder>::with_max_len(3);
+        let mut src = BytesMut::from(b"\x03foo\x04test".as_slice());
+        assert_eq!(dec.decode(&mut src).unwrap().unwrap(), "foo");
+        let err = dec.decode(&mut src).expect_err("long name must fail");
+        assert_eq!(err.kind(), std::io::ErrorKind::InvalidData);
+        assert_eq!(src.as_ref(), b"test");
+
+        let mut dec = <CoreVecDecoderBytes>::with_max_len(1);
+        let err = dec
+            .decode(&mut BytesMut::from(b"\x02".as_slice()))
+            .expect_err("long bytes must fail");
+        assert_eq!(err.kind(), std::io::ErrorKind::InvalidData);
+
+        let mut dec = <CoreVecDecoder<_>>::with_max_len(<CoreNameDecoder>::with_max_len(1), 1);
+        let mut src = BytesMut::from(b"\x01\x01a\x02".as_slice());
+        assert_eq!(dec.decode(&mut src).unwrap().unwrap(), ["a"]);
+        let err = dec.decode(&mut src).expect_err("long vec must fail");
+        assert_eq!(err.kind(), std::io::ErrorKind::InvalidData);
+
+        let mut dec = <CoreVecDecoder<_>>::with_max_len(<CoreNameDecoder>::with_max_len(1), 1);
+        let err = dec
+            .decode(&mut BytesMut::from(b"\x01\x02ab".as_slice()))
+            .expect_err("long name must fail");
+        assert_eq!(err.kind(), std::io::ErrorKind::InvalidData);
+    }
+
+    #[test_log::test(tokio::test)]
+    async fn read_name_max_len() {
+        let mut s = String::new();
+        b"\x03foo"
+            .as_slice()
+            .read_core_name(&mut s, 3)
+            .await
+            .expect("failed to read name");
+        assert_eq!(s, "foo");
+
+        let mut rx = b"\x04test".as_slice();
+        let err = rx
+            .read_core_name(&mut s, 3)
+            .await
+            .expect_err("long name must fail");
+        assert_eq!(err.kind(), std::io::ErrorKind::InvalidData);
+        assert_eq!(rx, b"test");
+    }
+
     #[test_log::test(tokio::test)]
     async fn string() {
         let mut s = String::new();
         "\x04test"
             .as_bytes()
-            .read_core_name(&mut s)
+            .read_core_name(&mut s, u32::MAX)
             .await
             .expect("failed to read string");
         assert_eq!(s, "test");
@@ -656,7 +740,7 @@ mod tests {
         let mut s = String::from("x");
         let err = b"\xff\xff\xff\xff\x0ftest"
             .as_slice()
-            .read_core_name(&mut s)
+            .read_core_name(&mut s, u32::MAX)
             .await
             .expect_err("truncated string must fail");
         assert_eq!(err.kind(), std::io::ErrorKind::UnexpectedEof);
