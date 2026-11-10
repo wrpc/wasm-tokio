@@ -962,7 +962,7 @@ macro_rules! impl_tuple_codec {
         impl<E, $($ct),+> Decoder for TupleDecoder<($($ct),+,), ($(Option<$ct::Item>),+,)>
         where
             E: From<std::io::Error>,
-            $($ct: Decoder<Error = E> + Default),+,
+            $($ct: Decoder<Error = E>),+,
         {
             type Error = E;
             type Item = ($($ct::Item),+,);
@@ -993,14 +993,8 @@ macro_rules! impl_tuple_codec {
         impl<E, $($ct),+> TupleDecoder<($($ct),+,), ($(Option<$ct::Item>),+,)>
         where
             E: From<std::io::Error>,
-            $($ct: Decoder<Error = E> + Default),+,
+            $($ct: Decoder<Error = E>),+,
         {
-            fn reset(&mut self) {
-                self.dec = ($($ct::default()),+,);
-                self.v = ($(Option::<$ct::Item>::None),+,);
-                self.started = false;
-            }
-
             fn decode_fields(
                 &mut self,
                 src: &mut BytesMut,
@@ -1009,49 +1003,35 @@ macro_rules! impl_tuple_codec {
                     let ($(ref mut $vn),+,) = self.v;
                     let ($(ref mut $cn),+,) = self.dec;
                     let n = src.len();
-                    let res: Result<Option<()>, E> = 'decode: {
+                    let res = 'decode: {
                         $(
                             if $vn.is_none() {
                                 let v = if eof { $cn.decode_eof(src) } else { $cn.decode(src) };
-                                match v {
-                                    Ok(Some(v)) => *$vn = Some(v),
-                                    Ok(None) => break 'decode Ok(None),
-                                    Err(err) => break 'decode Err(err),
-                                }
+                                let Some(v) = v? else {
+                                    break 'decode None;
+                                };
+                                *$vn = Some(v);
                             }
                         )+
-                        Ok(Some(()))
+                        Some(())
                     };
                     if src.len() < n {
                         self.started = true;
                     }
                     match res {
-                        Ok(Some(())) if self.started => {
+                        Some(()) if self.started => {
                             self.started = false;
                             Ok(Some(($($vn.take().unwrap()),+,)))
                         }
-                        Ok(Some(())) => {
-                            self.reset();
-                            Err(std::io::Error::new(
-                                std::io::ErrorKind::InvalidData,
-                                "tuple decoded from zero bytes",
-                            )
-                            .into())
+                        Some(()) => Err(std::io::Error::new(
+                            std::io::ErrorKind::InvalidData,
+                            "tuple decoded from zero bytes",
+                        )
+                        .into()),
+                        None if eof && (self.started || !src.is_empty()) => {
+                            Err(std::io::Error::from(std::io::ErrorKind::UnexpectedEof).into())
                         }
-                        Ok(None) if !eof => Ok(None),
-                        Ok(None) => {
-                            let started = self.started;
-                            self.reset();
-                            if started || !src.is_empty() {
-                                Err(std::io::Error::from(std::io::ErrorKind::UnexpectedEof).into())
-                            } else {
-                                Ok(None)
-                            }
-                        }
-                        Err(err) => {
-                            self.reset();
-                            Err(err)
-                        }
+                        None => Ok(None),
                     }
             }
         }
@@ -1227,9 +1207,7 @@ impl<T> OptionDecoder<T> {
     pub fn into_inner(self) -> T {
         self.dec
     }
-}
 
-impl<T> OptionDecoder<T> {
     pub fn new(decoder: T) -> Self {
         Self {
             dec: decoder,
@@ -1240,13 +1218,8 @@ impl<T> OptionDecoder<T> {
 
 impl<T> OptionDecoder<T>
 where
-    T: Decoder + Default,
+    T: Decoder,
 {
-    fn reset(&mut self) {
-        self.dec = T::default();
-        self.is_some = false;
-    }
-
     fn decode_value(
         &mut self,
         src: &mut BytesMut,
@@ -1273,23 +1246,17 @@ where
         } else {
             self.dec.decode(src)
         };
-        match res {
-            Ok(Some(v)) => {
-                self.is_some = false;
-                Ok(Some(Some(v)))
-            }
-            Ok(None) => Ok(None),
-            Err(err) => {
-                self.reset();
-                Err(err)
-            }
-        }
+        let Some(v) = res? else {
+            return Ok(None);
+        };
+        self.is_some = false;
+        Ok(Some(Some(v)))
     }
 }
 
 impl<T> Decoder for OptionDecoder<T>
 where
-    T: Decoder + Default,
+    T: Decoder,
 {
     type Item = Option<T::Item>;
     type Error = T::Error;
@@ -1310,10 +1277,7 @@ where
         match self.decode_value(src, true)? {
             Some(frame) => Ok(Some(frame)),
             None if !self.is_some => Ok(None),
-            None => {
-                self.reset();
-                Err(std::io::Error::from(std::io::ErrorKind::UnexpectedEof).into())
-            }
+            None => Err(std::io::Error::from(std::io::ErrorKind::UnexpectedEof).into()),
         }
     }
 }
@@ -1401,9 +1365,7 @@ impl<O, E> ResultDecoder<O, E> {
     pub fn into_err(self) -> E {
         self.err
     }
-}
 
-impl<O, E> ResultDecoder<O, E> {
     pub fn new(ok: O, err: E) -> Self {
         Self {
             ok,
@@ -1415,17 +1377,11 @@ impl<O, E> ResultDecoder<O, E> {
 
 impl<O, E> ResultDecoder<O, E>
 where
-    O: Decoder + Default,
-    E: Decoder + Default,
+    O: Decoder,
+    E: Decoder,
     std::io::Error: From<O::Error>,
     std::io::Error: From<E::Error>,
 {
-    fn reset(&mut self) {
-        self.ok = O::default();
-        self.err = E::default();
-        self.is_ok = None;
-    }
-
     fn decode_value(
         &mut self,
         src: &mut BytesMut,
@@ -1467,10 +1423,8 @@ where
             };
             v.map(|v| v.map(Err)).map_err(Into::into)
         };
-        match res {
-            Ok(Some(_)) => self.is_ok = None,
-            Ok(None) => {}
-            Err(_) => self.reset(),
+        if let Ok(Some(_)) = res {
+            self.is_ok = None;
         }
         res
     }
@@ -1478,8 +1432,8 @@ where
 
 impl<O, E> Decoder for ResultDecoder<O, E>
 where
-    O: Decoder + Default,
-    E: Decoder + Default,
+    O: Decoder,
+    E: Decoder,
     std::io::Error: From<O::Error>,
     std::io::Error: From<E::Error>,
 {
@@ -1502,10 +1456,7 @@ where
         match self.decode_value(src, true)? {
             Some(frame) => Ok(Some(frame)),
             None if self.is_ok.is_none() => Ok(None),
-            None => {
-                self.reset();
-                Err(std::io::ErrorKind::UnexpectedEof.into())
-            }
+            None => Err(std::io::ErrorKind::UnexpectedEof.into()),
         }
     }
 }
@@ -1562,69 +1513,44 @@ mod tests {
     }
 
     #[test_log::test]
-    fn option_reset_on_error() {
-        let mut dec = OptionDecoder::<CoreNameDecoder>::default();
-        let mut src = BytesMut::from(b"\x01\x01\xff".as_slice());
-        dec.decode(&mut src).expect_err("invalid UTF-8 must fail");
-        let mut src = BytesMut::from(b"\x01\x01b".as_slice());
-        assert_eq!(
-            dec.decode(&mut src).unwrap().unwrap(),
-            Some("b".to_string())
-        );
+    fn inner_error_propagates() {
+        let err = OptionDecoder::<CoreNameDecoder>::default()
+            .decode(&mut BytesMut::from(b"\x01\x01\xff".as_slice()))
+            .expect_err("invalid UTF-8 must fail");
+        assert_eq!(err.kind(), std::io::ErrorKind::InvalidData);
+        let err = ResultDecoder::<CoreNameDecoder, BoolCodec>::default()
+            .decode(&mut BytesMut::from(b"\x00\x01\xff".as_slice()))
+            .expect_err("invalid UTF-8 must fail");
+        assert_eq!(err.kind(), std::io::ErrorKind::InvalidData);
+        let err =
+            TupleDecoder::<(BoolCodec, CoreNameDecoder), (Option<bool>, Option<String>)>::default()
+                .decode(&mut BytesMut::from(b"\x01\x01\xff".as_slice()))
+                .expect_err("invalid UTF-8 must fail");
+        assert_eq!(err.kind(), std::io::ErrorKind::InvalidData);
     }
 
     #[test_log::test]
-    fn result_reset_on_error() {
-        let mut dec = ResultDecoder::<CoreNameDecoder, BoolCodec>::default();
-        let mut src = BytesMut::from(b"\x00\x01\xff".as_slice());
-        dec.decode(&mut src).expect_err("invalid UTF-8 must fail");
-        let mut src = BytesMut::from(b"\x01\x01".as_slice());
-        assert_eq!(dec.decode(&mut src).unwrap().unwrap(), Err(true));
-    }
-
-    #[test_log::test]
-    fn tuple_reset_on_error() {
-        let mut dec =
-            TupleDecoder::<(BoolCodec, CoreNameDecoder), (Option<bool>, Option<String>)>::default();
-        let mut src = BytesMut::from(b"\x01\x01\xff".as_slice());
-        dec.decode(&mut src).expect_err("invalid UTF-8 must fail");
-        let mut src = BytesMut::from(b"\x00\x01b".as_slice());
-        assert_eq!(
-            dec.decode(&mut src).unwrap().unwrap(),
-            (false, "b".to_string())
-        );
-    }
-
-    #[test_log::test]
-    fn option_reset_on_eof() {
+    fn option_truncated_eof() {
         let mut dec = OptionDecoder::<CoreNameDecoder>::default();
         let mut src = BytesMut::from(b"\x01\x02a".as_slice());
         let err = dec
             .decode_eof(&mut src)
             .expect_err("truncated option must fail");
         assert_eq!(err.kind(), std::io::ErrorKind::UnexpectedEof);
-        let mut src = BytesMut::from(b"\x01\x01b".as_slice());
-        assert_eq!(
-            dec.decode(&mut src).unwrap().unwrap(),
-            Some("b".to_string())
-        );
-        assert!(dec.decode_eof(&mut BytesMut::new()).unwrap().is_none());
     }
 
     #[test_log::test]
-    fn result_reset_on_eof() {
+    fn result_truncated_eof() {
         let mut dec = ResultDecoder::<CoreNameDecoder, BoolCodec>::default();
         let mut src = BytesMut::from(b"\x00".as_slice());
         let err = dec
             .decode_eof(&mut src)
             .expect_err("truncated result must fail");
         assert_eq!(err.kind(), std::io::ErrorKind::UnexpectedEof);
-        let mut src = BytesMut::from(b"\x01\x01".as_slice());
-        assert_eq!(dec.decode(&mut src).unwrap().unwrap(), Err(true));
     }
 
     #[test_log::test]
-    fn tuple_reset_on_eof() {
+    fn tuple_truncated_eof() {
         let mut dec = TupleDecoder::<
             (BoolCodec, OptionDecoder<CoreNameDecoder>),
             (Option<bool>, Option<Option<String>>),
@@ -1634,11 +1560,6 @@ mod tests {
             .decode_eof(&mut src)
             .expect_err("truncated tuple must fail");
         assert_eq!(err.kind(), std::io::ErrorKind::UnexpectedEof);
-        let mut src = BytesMut::from(b"\x00\x01\x01b".as_slice());
-        assert_eq!(
-            dec.decode(&mut src).unwrap().unwrap(),
-            (false, Some("b".to_string()))
-        );
     }
 
     #[derive(Default)]
@@ -1727,6 +1648,7 @@ mod tests {
             .decode(&mut BytesMut::new())
             .expect_err("zero-size tuple must fail");
         assert_eq!(err.kind(), std::io::ErrorKind::InvalidData);
+        let mut dec = TupleDecoder::<(FlagDecoder<0>,), (Option<Bytes>,)>::default();
         let err = dec
             .decode_eof(&mut BytesMut::new())
             .expect_err("zero-size tuple must fail");
@@ -1753,38 +1675,30 @@ mod tests {
     }
 
     #[test_log::test]
-    fn inner_reset_on_eof() {
+    fn inner_truncated_eof() {
         let mut dec = OptionDecoder::<PairDecoder>::default();
         let err = dec
             .decode_eof(&mut BytesMut::from(b"\x01a".as_slice()))
             .expect_err("truncated option must fail");
         assert_eq!(err.kind(), std::io::ErrorKind::UnexpectedEof);
-        let mut src = BytesMut::from(b"\x01bc".as_slice());
-        assert_eq!(dec.decode(&mut src).unwrap().unwrap(), Some(*b"bc"));
 
         let mut dec = ResultDecoder::<PairDecoder, BoolCodec>::default();
         let err = dec
             .decode_eof(&mut BytesMut::from(b"\x00a".as_slice()))
             .expect_err("truncated result must fail");
         assert_eq!(err.kind(), std::io::ErrorKind::UnexpectedEof);
-        let mut src = BytesMut::from(b"\x00bc".as_slice());
-        assert_eq!(dec.decode(&mut src).unwrap().unwrap(), Ok(*b"bc"));
 
         let mut dec = TupleDecoder::<(PairDecoder,), (Option<[u8; 2]>,)>::default();
         let err = dec
             .decode_eof(&mut BytesMut::from(b"a".as_slice()))
             .expect_err("truncated tuple must fail");
         assert_eq!(err.kind(), std::io::ErrorKind::UnexpectedEof);
-        let mut src = BytesMut::from(b"bc".as_slice());
-        assert_eq!(dec.decode(&mut src).unwrap().unwrap(), (*b"bc",));
 
         let mut dec = CoreVecDecoder::<PairDecoder>::default();
         let err = dec
             .decode_eof(&mut BytesMut::from(b"\x01a".as_slice()))
             .expect_err("truncated vec must fail");
         assert_eq!(err.kind(), std::io::ErrorKind::UnexpectedEof);
-        let mut src = BytesMut::from(b"\x01bc".as_slice());
-        assert_eq!(dec.decode(&mut src).unwrap().unwrap(), [*b"bc"]);
     }
 
     #[test_log::test]
