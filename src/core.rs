@@ -318,17 +318,6 @@ where
     pub fn into_inner(self) -> T {
         self.dec
     }
-}
-
-impl<T, const MAX_INITIAL_CAPACITY: usize> CoreVecDecoder<T, MAX_INITIAL_CAPACITY>
-where
-    T: Decoder + Default,
-{
-    fn reset(&mut self) {
-        self.dec = T::default();
-        self.cap = 0;
-        self.ret = Vec::default();
-    }
 
     fn decode_elements(
         &mut self,
@@ -351,13 +340,8 @@ where
             );
         }
         while self.cap > 0 {
-            let v = match decode(&mut self.dec, src) {
-                Ok(Some(v)) => v,
-                Ok(None) => return Ok(None),
-                Err(err) => {
-                    self.reset();
-                    return Err(err);
-                }
+            let Some(v) = decode(&mut self.dec, src)? else {
+                return Ok(None);
             };
             self.ret.push(v);
             self.cap = self.cap.saturating_sub(1);
@@ -377,7 +361,7 @@ where
 
 impl<T, const MAX_INITIAL_CAPACITY: usize> Decoder for CoreVecDecoder<T, MAX_INITIAL_CAPACITY>
 where
-    T: Decoder + Default,
+    T: Decoder,
 {
     type Item = Vec<T::Item>;
     type Error = T::Error;
@@ -390,10 +374,7 @@ where
         match self.decode_elements(src, T::decode_eof)? {
             Some(frame) => Ok(Some(frame)),
             None if self.cap == 0 && src.is_empty() => Ok(None),
-            None => {
-                self.reset();
-                Err(std::io::Error::from(std::io::ErrorKind::UnexpectedEof).into())
-            }
+            None => Err(std::io::Error::from(std::io::ErrorKind::UnexpectedEof).into()),
         }
     }
 }
@@ -466,7 +447,6 @@ impl<const MAX_INITIAL_CAPACITY: usize> Decoder for CoreVecDecoderBytes<MAX_INIT
                 if self.0 == 0 && src.is_empty() {
                     Ok(None)
                 } else {
-                    self.0 = 0;
                     Err(std::io::ErrorKind::UnexpectedEof.into())
                 }
             }
@@ -483,15 +463,21 @@ mod tests {
     use super::*;
 
     #[test_log::test]
-    fn vec_reset_on_eof() {
+    fn vec_inner_error_propagates() {
+        let err = CoreVecDecoder::<CoreNameDecoder>::default()
+            .decode(&mut BytesMut::from(b"\x03\x01a\x01\xff".as_slice()))
+            .expect_err("invalid UTF-8 must fail");
+        assert_eq!(err.kind(), std::io::ErrorKind::InvalidData);
+    }
+
+    #[test_log::test]
+    fn vec_truncated_eof() {
         let mut dec = CoreVecDecoder::<CoreNameDecoder>::default();
         let mut src = BytesMut::from(b"\x02\x01a\x02".as_slice());
         let err = dec
             .decode_eof(&mut src)
             .expect_err("truncated vec must fail");
         assert_eq!(err.kind(), std::io::ErrorKind::UnexpectedEof);
-        let mut src = BytesMut::from(b"\x01\x01b".as_slice());
-        assert_eq!(dec.decode(&mut src).unwrap().unwrap(), ["b"]);
     }
 
     #[test_log::test]
@@ -509,15 +495,13 @@ mod tests {
     }
 
     #[test_log::test]
-    fn bytes_reset_on_eof() {
+    fn bytes_truncated_eof() {
         let mut dec = <CoreVecDecoderBytes>::default();
         let mut src = BytesMut::from(b"\x03ab".as_slice());
         let err = dec
             .decode_eof(&mut src)
             .expect_err("truncated bytes must fail");
         assert_eq!(err.kind(), std::io::ErrorKind::UnexpectedEof);
-        let mut src = BytesMut::from(b"\x01c".as_slice());
-        assert_eq!(dec.decode(&mut src).unwrap().unwrap(), "c");
     }
 
     #[test_log::test(tokio::test)]
@@ -686,15 +670,5 @@ mod tests {
         assert!(dec.decode(&mut src).unwrap().is_none());
         assert!(dec.ret.capacity() <= 64 / mem::size_of::<String>());
         assert!(src.capacity() <= 128);
-    }
-
-    #[test]
-    fn vec_reset_on_error() {
-        let mut dec = CoreVecDecoder::<CoreNameDecoder>::default();
-        let mut src = BytesMut::from(b"\x03\x01a\x01\xff".as_slice());
-        dec.decode(&mut src).expect_err("invalid UTF-8 must fail");
-        assert_eq!(dec.ret.capacity(), 0);
-        let mut src = BytesMut::from(b"\x01\x01b".as_slice());
-        assert_eq!(dec.decode(&mut src).unwrap().unwrap(), ["b"]);
     }
 }
