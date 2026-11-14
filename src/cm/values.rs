@@ -870,6 +870,14 @@ impl<C, V> TupleDecoder<C, V> {
     pub fn into_inner(self) -> C {
         self.dec
     }
+
+    pub fn get_ref(&self) -> &C {
+        &self.dec
+    }
+
+    pub fn get_mut(&mut self) -> &mut C {
+        &mut self.dec
+    }
 }
 
 impl<C, V> TupleDecoder<C, V>
@@ -1208,6 +1216,14 @@ impl<T> OptionDecoder<T> {
         self.dec
     }
 
+    pub fn get_ref(&self) -> &T {
+        &self.dec
+    }
+
+    pub fn get_mut(&mut self) -> &mut T {
+        &mut self.dec
+    }
+
     pub fn new(decoder: T) -> Self {
         Self {
             dec: decoder,
@@ -1356,6 +1372,14 @@ pub struct ResultDecoder<O, E> {
 impl<O, E> ResultDecoder<O, E> {
     pub fn into_inner(self) -> (O, E) {
         (self.ok, self.err)
+    }
+
+    pub fn get_ref(&self) -> (&O, &E) {
+        (&self.ok, &self.err)
+    }
+
+    pub fn get_mut(&mut self) -> (&mut O, &mut E) {
+        (&mut self.ok, &mut self.err)
     }
 
     pub fn into_ok(self) -> O {
