@@ -352,6 +352,14 @@ where
         self.dec
     }
 
+    pub fn get_ref(&self) -> &T {
+        &self.dec
+    }
+
+    pub fn get_mut(&mut self) -> &mut T {
+        &mut self.dec
+    }
+
     fn decode_elements(
         &mut self,
         src: &mut BytesMut,
